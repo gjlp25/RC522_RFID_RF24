@@ -1,5 +1,5 @@
 # Prerequisites
-*.h
+secrets.h
 *.d
 
 # Compiled Object files
