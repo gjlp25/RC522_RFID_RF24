@@ -106,6 +106,7 @@ const uint64_t pipe01 = 0xE7E8C0F0B1LL;   // RF24 address for temp sensors
 const uint64_t pipe02 = 0xE7E8C0F0B2LL;   // RF24 address for doorbell
 const uint64_t pipe03 = 0xE7E8C0F0B3LL;   // RF24 address for door sensors
 const uint64_t pipe04 = 0xE7E8C0F0B4LL;   // RF24 address for PIR sensors
+const uint64_t pipe05 = 0xE7E8C0F0B5LL;   // RF24 address for RFID readers
 
 
 /*===========================================================
@@ -198,6 +199,7 @@ void setup() {
   radio.openReadingPipe(2, pipe02);
   radio.openReadingPipe(3, pipe03);
   radio.openReadingPipe(4, pipe04);
+  radio.openReadingPipe(5, pipe05);        // Add RFID pipe
   radio.setPALevel(RF24_PA_HIGH);
   radio.enableDynamicPayloads();
   radio.setDataRate(RF24_250KBPS);

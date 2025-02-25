@@ -23,12 +23,12 @@
 MFRC522 rfid(SS_PIN, RST_PIN);
 RF24 radio(CE_PIN, CSN_PIN);
 
-// Define RF24 pipe
-const uint64_t pipe = 0xE7E8C0F0B1LL;
+// Define RF24 pipe - Changed to match gateway pipe5 for RFID
+const uint64_t pipe = 0xE7E8C0F0B5LL;  // Changed from B1 to B5
 
-// Define LED pins
-const int greenLedPin = 12;
-const int redLedPin = 13;
+// Define LED pins with fixed pin conflicts
+const int greenLedPin = 6;  // Changed from 12
+const int redLedPin = 7;    // Changed from 13
 const int buzzerPin = 10;
 
 // Dictionary for authorized cards with names
@@ -101,7 +101,13 @@ void handleCard(uint32_t cardId, const char* name) {
   // Prepare and send data via RF24
   sensorData.card_id = cardId;
   sensorData.authorized = isAuthorized;
-  sensorData.batt = analogRead(A2) * (3.3 / 1023.0);  // Assuming battery voltage reading
+  
+  // Improved battery voltage calculation assuming voltage divider R1=100k, R2=100k
+  const float R1 = 100000.0;
+  const float R2 = 100000.0;
+  float raw = analogRead(A2);
+  sensorData.batt = raw * (3.3 / 1023.0) * ((R1 + R2) / R2);
+  
   sensorData.sensor_id = 1;  // Change this if you have multiple RFID readers
 
   radio.powerUp();

@@ -1,136 +1,117 @@
-# RC522 RFID and RF24 Gateway
+# RFID Access Control with NRF24L01 Transmission
 
-This project is an implementation of an RF24 gateway using an ESP8266 and an RC522 RFID reader. The gateway communicates with various sensors using the nRF24L01+ module and sends data to an MQTT broker.
+Battery-optimized Arduino project using RC522 RFID reader and NRF24L01 radio module for access control and wireless data transmission.
 
-## Functionality
+## Hardware Requirements
 
-- **RF24 Gateway**: Receives data from nRF24L01+ based sensors and sends it to an MQTT broker.
-- **RFID Reader**: Reads RFID tags and checks if they are authorized. Sends the data to the gateway.
-- **MQTT Communication**: Publishes sensor data to an MQTT broker.
-- **OTA Updates**: Supports Over-The-Air (OTA) updates for the ESP8266.
+- Arduino Pro Mini 3.3V/8MHz
+- MFRC522 RFID Reader
+- NRF24L01 Radio Module
+- LEDs (Green and Red)
+- Buzzer
+- Battery (3.3V compatible)
 
-## Structure
+## Pin Configuration
 
-The project consists of the following main files:
+### RFID RC522
+- RST_PIN: 9   (Reset pin for RC522)
+- SS_PIN: 8    (SDA/SS pin for SPI chip select)
+- MISO: 12     (Master Input Slave Output - data from RC522 to Arduino)
+- MOSI: 11     (Master Output Slave Input - data from Arduino to RC522)
+- SCK: 13      (Serial Clock for SPI communication)
+- 3.3V: VCC    (Power supply - IMPORTANT: Do not use 5V!)
+- GND: GND     (Ground)
 
-- `rf24gatewayV4.2.ino`: The main gateway code for the ESP8266.
-- `main_rf24_rc522.ino`: The code for the Arduino Pro Mini with the RC522 RFID reader.
-- `secrets.h`: Contains WiFi, MQTT, and OTA credentials.
+Notes:
+- MISO, MOSI, and SCK are hardware SPI pins and cannot be changed
+- SS_PIN can be any digital pin (8 chosen for optimal routing)
+- RST_PIN can be any digital pin (9 chosen for optimal routing)
+- The module must be powered with 3.3V to avoid damage
 
-## Libraries
+### NRF24L01
+- CE_PIN: A1
+- CSN_PIN: A0
+- SCK_PIN: 13 (Hardware SPI)
+- MOSI_PIN: 11 (Hardware SPI)
+- MISO_PIN: 12 (Hardware SPI)
 
-The following libraries are used in this project:
+### Indicators
+- Green LED: 6
+- Red LED: 7
+- Buzzer: 10
 
-- `SPI.h`: For SPI communication.
-- `nRF24L01.h` and `RF24.h`: For nRF24L01+ communication.
-- `ESP8266WiFi.h`: For WiFi connectivity.
-- `PubSubClient.h`: For MQTT communication.
-- `ESP8266mDNS.h`, `WiFiUdp.h`, and `ArduinoOTA.h`: For OTA updates.
-- `MFRC522.h`: For RFID reader.
-- `LowPower.h`: For power management on the Arduino Pro Mini.
+### Other
+- Battery Voltage Reading: A2
 
-## Secrets
+## Features
 
-The `secrets.h` file contains the following definitions:
+- Low power operation with sleep mode
+- RFID card authentication
+- Visual feedback (LEDs)
+- Audio feedback (Buzzer)
+- Wireless data transmission
+- Battery voltage monitoring
 
+## Dependencies
+
+- SPI.h
+- MFRC522.h
+- RF24.h
+- LowPower.h
+
+## Radio Transmission Details
+
+Data packet structure:
 ```cpp
-#ifndef SECRETS_H
-#define SECRETS_H
-
-// WiFi credentials
-#define WIFI_SSID "your_wifi_ssid"
-#define WIFI_PASSWORD "your_wifi_password"
-
-// MQTT credentials
-#define MQTT_SERVER "your_mqtt_server_ip"
-#define MQTT_USER "your_mqtt_username"
-#define MQTT_PASSWORD "your_mqtt_password"
-
-// OTA password
-#define OTA_PASSWORD "your_ota_password"
-
-#endif
+struct {
+    uint32_t card_id;      // RFID card identifier
+    bool authorized;       // Authentication status
+    float batt;           // Battery voltage
+    unsigned char sensor_id; // Device identifier
+}
 ```
 
-## Diagram
+Channel: 108
+Data Rate: 250KBPS
+Power Amplifier Level: High
 
-```mermaid
-graph TD;
-    A[ESP8266] -->|WiFi| B[MQTT Broker]
-    A -->|nRF24L01+| C[Temp Sensor]
-    A -->|nRF24L01+| D[Door Sensor]
-    A -->|nRF24L01+| E[PIR Sensor]
-    A -->|nRF24L01+| F[RFID Reader]
-    F -->|RF24| A
-    G[Arduino Pro Mini] -->|SPI| F
+## Wiring Instructions
+
+### RC522 to Arduino Pro Mini Connection
+```
+RC522 Module      Arduino Pro Mini
+-------------     ----------------
+3.3V    <------> VCC (3.3V)
+RST     <------> D9
+GND     <------> GND
+MISO    <------> D12 (MISO)
+MOSI    <------> D11 (MOSI)
+SCK     <------> D13 (SCK)
+SDA     <------> D8  (SS)
 ```
 
-## Setup
-
-1. **ESP8266 Setup**:
-   - Flash the `rf24gatewayV4.2.ino` code to the ESP8266.
-   - Ensure the `secrets.h` file is correctly filled with your credentials.
-
-2. **Arduino Pro Mini Setup**:
-   - Flash the `main_rf24_rc522.ino` code to the Arduino Pro Mini.
-   - Connect the RC522 RFID reader and nRF24L01+ module as per the pin definitions.
-
-3. **MQTT Broker**:
-   - Set up an MQTT broker and ensure the ESP8266 can connect to it using the credentials in `secrets.h`.
-
-4. **OTA Updates**:
-   - Use the OTA password defined in `secrets.h` for secure updates.
-
-## Wiring
-
-To wire up the RC522 RFID module to the Arduino Pro Mini 3.3V, you need to connect the pins as follows:
-
-| RC522 Pin | Arduino Pro Mini Pin | Notes |
-|-----------|---------------------|-------|
-| SDA (SS)  | 8                  | Defined as `SS_PIN` in code |
-| SCK       | 13                 | SPI Clock |
-| MOSI      | 11                 | SPI MOSI |
-| MISO      | 12                 | SPI MISO |
-| IRQ       | *not connected*    | Not used in this project |
-| GND       | GND                | Ground |
-| RST       | 9                  | Defined as `RST_PIN` in code |
-| 3.3V      | 3.3V               | Power |
-
-Important notes:
-- The Arduino Pro Mini 3.3V/8MHz version is the correct choice since the RC522 operates at 3.3V.
-- Never connect the RC522 to 5V as it may damage the module.
-- The connections use the hardware SPI pins of the Pro Mini (11, 12, 13).
-
-Here's a visual representation of the Arduino Pro Mini pinout for reference:
-
+Visual Connection Diagram:
 ```
-       Arduino Pro Mini 3.3V
-    _________________________
-   |                         |
-   |             TX1        |
-   |             RX0        |
-RST |             RST       |
-GND |             GND       |
-2   |                       |
-3   |                       |
-4   |                       |
-5   |                       |
-6   |                       |
-7   |                       |
-8   |             A0        | 
-9   |             A1        |
-10  |             A2        |
-11  |             A3        |
-12  |                       |
-13  |                       |
-    |_______________________|
+┌──────────────────┐
+│                  │
+│    RC522 RFID   │
+│                  │
+└─┬──┬──┬──┬──┬──┬┘
+  │  │  │  │  │  │
+  │  │  │  │  │  │    ┌──────────────────┐
+  │  │  │  │  │  │    │                  │
+  │  │  │  │  │  └────┤D8  Arduino   VCC │
+  │  │  │  │  └───────┤D11 Pro      GND ├──┐
+  │  │  │  └─────────┤D12 Mini         │  │
+  │  │  └───────────┤D13              │  │
+  │  └─────────────┤D9               │  │
+  └───────────────┤GND              │  │
+                  │                  │  │
+                  └──────────┬───────┘  │
+                            │           │
+                            └───────────┘
 ```
 
-## Usage
-
-- Power on the ESP8266 and Arduino Pro Mini.
-- The ESP8266 will connect to WiFi and start listening for data from the nRF24L01+ sensors.
-- The Arduino Pro Mini will read RFID tags and send the data to the ESP8266 via the nRF24L01+ module.
-- The ESP8266 will publish the sensor data to the MQTT broker.
+Note: Make sure to use 3.3V for powering the RC522 module, as 5V can damage it. The Arduino Pro Mini 3.3V/8MHz version is ideal for this setup.
 
 
