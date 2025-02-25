@@ -8,11 +8,16 @@
 #include <RF24.h>
 #include <LowPower.h>
 
-// Define pins for RFID and RF24
+// Define pins for RC522
 #define RST_PIN 9
-#define SS_PIN 10
-#define CE_PIN 15  
-#define CSN_PIN 14 
+#define SS_PIN 8
+
+// Define pins for RF24
+#define CE_PIN A1  
+#define CSN_PIN A0 
+#define SCK_PIN 13
+#define MOSI_PIN 11
+#define MISO_PIN 12
 
 // Initialize RFID and RF24
 MFRC522 rfid(SS_PIN, RST_PIN);
@@ -107,7 +112,7 @@ void handleCard(uint32_t cardId, const char* name) {
 void setup() {
   Serial.begin(9600);
   SPI.begin();
-  rfid.PCD_Init();
+  rfid.PCD_Init(SS_PIN, RST_PIN);  // Initialize RFID with new SS and RST pins
   pinMode(greenLedPin, OUTPUT);
   pinMode(redLedPin, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
