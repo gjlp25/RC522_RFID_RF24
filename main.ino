@@ -11,8 +11,8 @@
 // Define pins for RFID and RF24
 #define RST_PIN 9
 #define SS_PIN 10
-#define CE_PIN 15
-#define CSN_PIN 14
+#define CE_PIN 15  
+#define CSN_PIN 14 
 
 // Initialize RFID and RF24
 MFRC522 rfid(SS_PIN, RST_PIN);

@@ -81,6 +81,32 @@ graph TD;
 4. **OTA Updates**:
    - Use the OTA password defined in `secrets.h` for secure updates.
 
+## Wiring
+
+To wire up the RC522 RFID module to the Arduino Pro Micro, you need to connect the pins as follows:
+
+- **VCC**: Connect to the 3.3V pin on the Arduino Pro Micro.
+- **GND**: Connect to the GND pin on the Arduino Pro Micro.
+- **SDA (SS)**: Connect to pin 10 on the Arduino Pro Micro.
+- **SCK**: Connect to pin 15 (SCK) on the Arduino Pro Micro.
+- **MOSI**: Connect to pin 16 (MOSI) on the Arduino Pro Micro.
+- **MISO**: Connect to pin 14 (MISO) on the Arduino Pro Micro.
+- **RST**: Connect to pin 9 on the Arduino Pro Micro.
+
+Here is a summary of the connections:
+
+| RC522 Pin | Arduino Pro Micro Pin |
+|-----------|------------------------|
+| VCC       | 3.3V                   |
+| GND       | GND                    |
+| SDA (SS)  | 10                     |
+| SCK       | 15 (SCK)               |
+| MOSI      | 16 (MOSI)              |
+| MISO      | 14 (MISO)              |
+| RST       | 9                      |
+
+Make sure to double-check the pin numbers and connections to ensure proper communication between the RC522 module and the Arduino Pro Micro.
+
 ## Usage
 
 - Power on the ESP8266 and Arduino Pro Mini.
