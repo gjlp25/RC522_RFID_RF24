@@ -9,8 +9,8 @@
 #include <LowPower.h>
 
 // Define pins for RC522
-#define RST_PIN 9
-#define SS_PIN 8
+#define RST_PIN 5  // Changed from 9
+#define SS_PIN 4   // Changed from 8
 
 // Define pins for RF24
 #define CE_PIN A1  
