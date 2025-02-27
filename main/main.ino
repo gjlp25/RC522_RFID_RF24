@@ -3,152 +3,136 @@
   Battery optimized / RC522 RFID Reader / NRF24L01
 */
 
+#include "LowPower.h"
 #include <SPI.h>
+#include "nRF24L01.h"
+#include "RF24.h"
 #include <MFRC522.h>
-#include <RF24.h>
-#include <LowPower.h>
 
 // Define pins for RC522
-#define RST_PIN 5  // Changed from 9
-#define SS_PIN 4   // Changed from 8
+#define RST_PIN 5
+#define SS_PIN 4
 
 // Define pins for RF24
-#define CE_PIN A1  
-#define CSN_PIN A0 
-#define SCK_PIN 13
-#define MOSI_PIN 11
-#define MISO_PIN 12
+#define CE_PIN 15    // Hardwired CE pin
+#define CSN_PIN 14   // Hardwired CSN pin
 
-// Initialize RFID and RF24
-MFRC522 rfid(SS_PIN, RST_PIN);
+// LED pins for debugging
+const int greenLedPin = 6;
+const int redLedPin = 7;
+
+// Initialize RF24 and RFID
 RF24 radio(CE_PIN, CSN_PIN);
+MFRC522 rfid(SS_PIN, RST_PIN);
 
-// Define RF24 pipe - Changed to match gateway pipe5 for RFID
-const uint64_t pipe = 0xE7E8C0F0B5LL;  // Changed from B1 to B5
+// Use pipe05 from gateway for RFID communications
+const uint64_t pipe05 = 0xE7E8C0F0B5LL;
 
-// Define LED pins with fixed pin conflicts
-const int greenLedPin = 6;  // Changed from 12
-const int redLedPin = 7;    // Changed from 13
-const int buzzerPin = 10;
+// Battery voltage calculation
+float aref_fix = 1.065;
 
-// Dictionary for authorized cards with names
-struct AuthorizedCard {
-  uint32_t id;
-  const char* name;
-};
-
-AuthorizedCard authorizedCards[] = {
-  {1036396588, "Wies"},
-  {571511444, "Tim"}
-};
-
-// Add structure for RF24 transmission
+// Match gateway's sensorData5 structure
 struct {
   uint32_t card_id;
   bool authorized;
   float batt;
   unsigned char sensor_id;
-} sensorData;
+} sensorData5;
 
-// Function to check if card is authorized
-const char* checkAuthorized(uint32_t cardId) {
-  for (auto& card : authorizedCards) {
-    if (card.id == cardId) {
-      return card.name;
-    }
-  }
-  return nullptr;
-}
-
-// Function to reset LEDs
-void resetLeds() {
-  digitalWrite(greenLedPin, LOW);
-  digitalWrite(redLedPin, LOW);
-}
-
-// Function to beep buzzer
-void beepBuzzer(int times, int delayMs) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(buzzerPin, HIGH);
-    delay(delayMs);
-    digitalWrite(buzzerPin, LOW);
-    delay(delayMs);
-  }
-}
-
-// Function to handle card
-void handleCard(uint32_t cardId, const char* name) {
-  bool isAuthorized = name != nullptr;
-  
-  if (isAuthorized) {
-    Serial.print("Card ID: ");
-    Serial.print(cardId);
-    Serial.print(" (Name: ");
-    Serial.print(name);
-    Serial.println(") PASS: Green Light Activated");
-    digitalWrite(greenLedPin, HIGH);
-    beepBuzzer(1, 500);
-    digitalWrite(greenLedPin, LOW);
-  } else {
-    Serial.print("Card ID: ");
-    Serial.print(cardId);
-    Serial.println(" UNKNOWN CARD! Red Light Activated");
-    digitalWrite(redLedPin, HIGH);
-    beepBuzzer(3, 100);
-    digitalWrite(redLedPin, LOW);
-  }
-
-  // Prepare and send data via RF24
-  sensorData.card_id = cardId;
-  sensorData.authorized = isAuthorized;
-  
-  // Improved battery voltage calculation assuming voltage divider R1=100k, R2=100k
-  const float R1 = 100000.0;
-  const float R2 = 100000.0;
-  float raw = analogRead(A2);
-  sensorData.batt = raw * (3.3 / 1023.0) * ((R1 + R2) / R2);
-  
-  sensorData.sensor_id = 1;  // Change this if you have multiple RFID readers
-
-  radio.powerUp();
-  radio.write(&sensorData, sizeof(sensorData));
-}
-
-// Setup function
 void setup() {
-  Serial.begin(9600);
-  SPI.begin();
-  rfid.PCD_Init(SS_PIN, RST_PIN);  // Initialize RFID with new SS and RST pins
   pinMode(greenLedPin, OUTPUT);
   pinMode(redLedPin, OUTPUT);
-  pinMode(buzzerPin, OUTPUT);
+  
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println(F("\n\nRFID Reader"));
+  
+  // Initialize SPI and RFID
+  SPI.begin();
+  rfid.PCD_Init();
+  
+  // Test RC522
+  byte v = rfid.PCD_ReadRegister(rfid.VersionReg);
+  Serial.print(F("RC522 Version: 0x"));
+  Serial.println(v, HEX);
+  
+  if((v == 0x91) || (v == 0x92)) {
+    digitalWrite(greenLedPin, HIGH);
+    Serial.println(F("RC522 OK"));
+  } else {
+    digitalWrite(redLedPin, HIGH);
+    Serial.println(F("RC522 FAIL"));
+  }
+  delay(1000);
+  digitalWrite(greenLedPin, LOW);
+  digitalWrite(redLedPin, LOW);
+  
+  // Initialize RF24
+  Serial.println(F("Init RF24..."));
   radio.begin();
   radio.setChannel(108);
-  radio.openWritingPipe(pipe);
+  radio.openWritingPipe(pipe05);
   radio.setPALevel(RF24_PA_HIGH);
   radio.enableDynamicPayloads();
   radio.setDataRate(RF24_250KBPS);
   radio.setRetries(8, 10);
   radio.stopListening();
-  Serial.println("Bring RFID TAG Closer...\n");
+  
+  sensorData5.sensor_id = 1;  // Set RFID reader ID
+  
+  Serial.println(F("Ready"));
 }
 
-// Loop function
 void loop() {
-  radio.powerDown();
-  for (int i = 0; i < 8; i++) {
-    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+  // Check for cards continuously
+  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+    digitalWrite(greenLedPin, HIGH);  // Visual feedback
+    
+    // Convert UID to single uint32_t
+    uint32_t cardId = 0;
+    for (byte i = 0; i < rfid.uid.size; i++) {
+      cardId = (cardId << 8) | rfid.uid.uidByte[i];
+    }
+    
+    Serial.print(F("Card detected! ID: "));
+    Serial.println(cardId);
+    
+    sensorData5.card_id = cardId;
+    sensorData5.authorized = false;  // Gateway will handle authorization
+    
+    // Read battery voltage
+    int reading = analogRead(A2);
+    float vout = (reading * aref_fix) / 1023.0;
+    sensorData5.batt = (1330.0/330.0) * vout;
+    
+    Serial.print(F("Battery voltage: "));
+    Serial.println(sensorData5.batt);
+    
+    radio.powerUp();
+    delay(100);
+    Serial.println(F("Sending data to gateway..."));
+    
+    bool report = radio.write(&sensorData5, sizeof(sensorData5));
+    
+    if (report) {
+      Serial.println(F("Transmission successful"));
+      digitalWrite(greenLedPin, HIGH);
+      delay(100);
+      digitalWrite(greenLedPin, LOW);
+      delay(100);
+      digitalWrite(greenLedPin, HIGH);
+      delay(100);
+      digitalWrite(greenLedPin, LOW);
+    } else {
+      Serial.println(F("Transmission failed"));
+      digitalWrite(redLedPin, HIGH);
+      delay(500);
+      digitalWrite(redLedPin, LOW);
+    }
+    
+    rfid.PICC_HaltA();
+    rfid.PCD_StopCrypto1();
   }
-
-  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
-    return;
-  }
-
-  uint32_t cardId = 0;
-  for (byte i = 0; i < rfid.uid.size; i++) {
-    cardId = (cardId << 8) | rfid.uid.uidByte[i];
-  }
-
-  const char* name = checkAuthorized(cardId);
-  handleCard(cardId, name);
+  
+  delay(100);  // Small delay to prevent too rapid scanning
 }
