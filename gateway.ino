@@ -22,9 +22,11 @@
   
   V4.2 - Added retain flag to some MQTT transmissions in order for hassio to save last value after restart
        - Code cleanup
+
+  V4.3 - Added support for RFID sensors
 */
 
-/*===========================================================
+ /*===========================================================
  ********** DEBUG ON/OFF
   ===========================================================*/
 
@@ -98,8 +100,6 @@
   
   WiFiClient espClient;                     // initializing ESP8266
   PubSubClient client(espClient);           // initializing MQTT client
-  
-  RF24 radio(D2, D8);                       // initializing RF24 and defining CE & CSN
   
   const uint64_t pipe01 = 0xE7E8C0F0B1LL;   // RF24 address for temp sensors
   const uint64_t pipe02 = 0xE7E8C0F0B2LL;   // RF24 address for doorbell
@@ -219,10 +219,7 @@
     Serial.println(wifi_ssid);
   
     WiFi.mode(WIFI_STA);
-<<<<<<< HEAD
     WiFi.hostname("RF24Gateway");    // Set the hostname
-=======
->>>>>>> d0c7f21f4ee2e4a1714465f64527c44a81d125c2
   
     WiFi.begin(wifi_ssid, wifi_password);
   
@@ -507,7 +504,3 @@
   
     client.publish(topicBuffer, payloadBuffer, true);
   }
-<<<<<<< HEAD
-=======
-  
->>>>>>> d0c7f21f4ee2e4a1714465f64527c44a81d125c2

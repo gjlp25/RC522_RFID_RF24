@@ -69,6 +69,20 @@ Channel: 108
 Data Rate: 250KBPS
 Power Amplifier Level: High
 
+## MQTT Message Format
+
+### RFID Sensor Messages
+Topic: `rf24/rfid<sensor_id>`
+Payload format:
+```json
+{
+    "card_id": <uint32_t>,
+    "authorized": <bool>,
+    "batt": <float>,
+    "sensor_id": <unsigned char>
+}
+```
+
 ## Wiring Instructions
 
 ### RC522 to Arduino Pro Mini Connection
