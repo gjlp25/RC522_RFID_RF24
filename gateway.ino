@@ -219,7 +219,10 @@
     Serial.println(wifi_ssid);
   
     WiFi.mode(WIFI_STA);
+<<<<<<< HEAD
     WiFi.hostname("RF24Gateway");    // Set the hostname
+=======
+>>>>>>> d0c7f21f4ee2e4a1714465f64527c44a81d125c2
   
     WiFi.begin(wifi_ssid, wifi_password);
   
@@ -504,3 +507,7 @@
   
     client.publish(topicBuffer, payloadBuffer, true);
   }
+<<<<<<< HEAD
+=======
+  
+>>>>>>> d0c7f21f4ee2e4a1714465f64527c44a81d125c2
