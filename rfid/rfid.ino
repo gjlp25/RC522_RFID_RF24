@@ -28,8 +28,25 @@ MFRC522 rfid(SS_PIN, RST_PIN);
 // Use pipe05 from gateway for RFID communications
 const uint64_t pipe05 = 0xE7E8C0F0B5LL;
 
+// Authorized card IDs (add your card IDs here)
+const uint32_t authorized_cards[] = {
+  0x2492600354,  // Example card 1
+  0x87654321   // Example card 2
+};
+const int num_authorized_cards = sizeof(authorized_cards) / sizeof(authorized_cards[0]);
+
 // Battery voltage calculation
 float aref_fix = 1.065;
+
+// Function to check if a card is authorized
+bool isCardAuthorized(uint32_t cardId) {
+  for(int i = 0; i < num_authorized_cards; i++) {
+    if(authorized_cards[i] == cardId) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Match gateway's sensorData5 structure
 struct {
@@ -98,7 +115,7 @@ void loop() {
     Serial.println(cardId);
     
     sensorData5.card_id = cardId;
-    sensorData5.authorized = false;  // Gateway will handle authorization
+    sensorData5.authorized = isCardAuthorized(cardId);  // Local authorization check
     
     // Read battery voltage
     int reading = analogRead(A2);

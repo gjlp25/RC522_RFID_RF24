@@ -2,6 +2,7 @@
 secrets.h
 *.d
  .DS_Store
+ mqtt.yaml
 
 # Compiled Object files
 *.slo
