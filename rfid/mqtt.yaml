@@ -1,5 +1,4 @@
-
-# Gateway heartbeat sensor
+# Gateway heartbeat sensor and RFID binary sensors
 binary_sensor:
   - platform: mqtt
     name: "RF24 Gateway Status"
@@ -7,6 +6,22 @@ binary_sensor:
     payload_on: "on"
     payload_off: "off"
     device_class: connectivity
+
+  - platform: mqtt
+    name: "RFID Reader 1 Access"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.authorized }}"
+    payload_on: "true"
+    payload_off: "false"
+    device_class: "lock"
+
+  - platform: mqtt
+    name: "RFID Reader 1 Connection"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.connected | default('false') }}"
+    payload_on: "true"
+    payload_off: "false"
+    device_class: "connectivity"
 
 # RFID Sensors
 sensor:
@@ -20,7 +35,9 @@ sensor:
       {
         "authorized": {{ value_json.authorized }},
         "battery": {{ value_json.batt }},
-        "battery_percentage": {{ value_json.batt_perc }}
+        "battery_percentage": {{ value_json.batt_perc }},
+        "last_retry_count": {{ value_json.retries | default(0) }},
+        "signal_quality": {{ value_json.signal | default(0) }}
       }
     device_class: "id"
     state_class: "measurement"
@@ -34,18 +51,25 @@ sensor:
     device_class: "battery"
     state_class: "measurement"
 
-# Authorization status
-binary_sensor:
+  # RF24 Signal Quality Indicator
   - platform: mqtt
-    name: "RFID Reader 1 Access"
+    name: "RFID Reader 1 Signal"
     state_topic: "rf24/rfid1"
-    value_template: "{{ value_json.authorized }}"
-    payload_on: "true"
-    payload_off: "false"
-    device_class: "lock"
+    unit_of_measurement: "%"
+    value_template: "{{ value_json.signal | default(0) }}"
+    device_class: "signal_strength"
+    state_class: "measurement"
 
-# Optional: Automations for unauthorized access attempts
+  # Transmission Retry Counter
+  - platform: mqtt
+    name: "RFID Reader 1 Retries"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.retries | default(0) }}"
+    state_class: "measurement"
+
+# Automations
 automation:
+  # Unauthorized access attempts
   - alias: "RFID Unauthorized Access Attempt"
     trigger:
       platform: mqtt
@@ -56,3 +80,32 @@ automation:
         data:
           title: "Unauthorized RFID Access Attempt"
           message: "Card ID {{ trigger.payload_json.card_id }} attempted access"
+
+  # Communication issues
+  - alias: "RFID Communication Problems"
+    trigger:
+      platform: mqtt
+      topic: "rf24/rfid1"
+      value_template: "{{ value_json.retries > 2 }}"
+    action:
+      - service: notify.notify
+        data:
+          title: "RFID Communication Issues"
+          message: >
+            High retry count ({{ trigger.payload_json.retries }}) detected.
+            Signal quality: {{ trigger.payload_json.signal }}%
+            Battery level: {{ trigger.payload_json.batt_perc }}%
+
+  # Low signal quality alert
+  - alias: "RFID Low Signal Quality"
+    trigger:
+      platform: mqtt
+      topic: "rf24/rfid1"
+      value_template: "{{ value_json.signal < 50 }}"
+    action:
+      - service: notify.notify
+        data:
+          title: "RFID Signal Quality Alert"
+          message: >
+            Low signal quality detected ({{ trigger.payload_json.signal }}%).
+            Consider checking antenna position or interference sources.

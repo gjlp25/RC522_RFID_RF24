@@ -493,8 +493,22 @@ void MQTT_sensorData5() {
 
   char cardIdString[11];
   sprintf(cardIdString, "%lu", sensorData5.card_id);
+  
+  // Calculate signal quality based on retry count
+  int retryCount = radio.getARC(); // Get Auto Retry Count
+  int signalQuality = 100;
+  if(retryCount > 0) {
+    signalQuality = max(0, 100 - (retryCount * 20)); // Reduce quality by 20% per retry
+  }
  
-  String payloadString = "{\"card_id\":\"" + String(cardIdString) + "\",\"authorized\":\"" + String(sensorData5.authorized ? "true" : "false") + "\",\"batt\":\"" + String(battString) + "\",\"batt_perc\":\"" + String(battPercString) + "\"}";
+  String payloadString = "{\"card_id\":\"" + String(cardIdString) + 
+                        "\",\"authorized\":\"" + String(sensorData5.authorized ? "true" : "false") + 
+                        "\",\"batt\":\"" + String(battString) + 
+                        "\",\"batt_perc\":\"" + String(battPercString) + 
+                        "\",\"retries\":\"" + String(retryCount) + 
+                        "\",\"signal\":\"" + String(signalQuality) + 
+                        "\",\"connected\":\"" + String(radio.isChipConnected() ? "true" : "false") + 
+                        "\"}";
   const char *payloadBuffer;
   payloadBuffer = payloadString.c_str();
 
