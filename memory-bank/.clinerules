@@ -1,0 +1,45 @@
+# RFID Reader Project Rules
+
+## Project Patterns
+1. All hardware pins are defined at the top using #define
+2. LED and buzzer feedback functions are grouped together
+3. SPI device selection is managed through dedicated configuration functions
+4. Error handling includes both visual and audio feedback
+5. Power optimization is a primary consideration in all changes
+
+## Code Style
+1. Functions use camelCase naming
+2. Constants use UPPER_CASE
+3. Pin definitions use Snake_Case (e.g., RST_PIN)
+4. Clear function separation for different responsibilities
+5. Consistent error handling patterns
+
+## Documentation Requirements
+1. All timing values must be clearly documented
+2. Power management changes require careful consideration
+3. Hardware pin changes must be updated in all documentation
+4. Changes to feedback patterns must maintain clear user distinction
+
+## Testing Patterns
+1. Hardware changes require power consumption validation
+2. Timing changes need real-world testing
+3. Error conditions must be explicitly tested
+4. User feedback requires physical verification
+
+## Change Management
+1. Power-related changes require extra scrutiny
+2. SPI bus changes need careful timing verification
+3. Interrupt-related changes must preserve reliability
+4. User feedback changes must maintain clarity
+
+## Implementation Preferences
+1. Prefer interrupt-based detection over polling
+2. Use clear timing constants for feedback patterns
+3. Implement robust error recovery
+4. Maintain consistent user feedback patterns
+
+## Known Project Quirks
+1. RC522 requires specific timing for initialization
+2. NRF24L01 needs power stabilization delays
+3. SPI bus sharing requires careful state management
+4. Interrupt handling is timing-sensitive

@@ -18,6 +18,10 @@
 // Define pins for RC522
 #define RST_PIN 5
 #define SS_PIN 4
+#define IRQ_PIN 2  // IRQ pin for RC522
+
+// Define pin for buzzer
+#define BUZZER_PIN 3
 
 // Define pins for RF24
 #define CE_PIN 15    // Hardwired CE pin
@@ -70,9 +74,14 @@ void handleCardDetection();
 void configureSPI_RC522();
 void configureSPI_RF24();
 
+// Interrupt flag
+volatile bool cardPresent = false;
+
 void setup() {
   pinMode(greenLedPin, OUTPUT);
   pinMode(redLedPin, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(IRQ_PIN, INPUT_PULLUP);
   
   Serial.begin(115200);
   delay(100);
@@ -92,10 +101,21 @@ void setup() {
   
   sensorData5.sensor_id = 1;  // Set RFID reader ID
   
+  // Configure IRQ pin interrupt
+  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), cardDetectedISR, FALLING);
+  
+  // Enable IRQ pin in RC522
+  rfid.PCD_WriteRegister(rfid.ComIEnReg, 0xA0); // Enable IRQ for card detect
+  
   Serial.println(F("System Ready"));
   digitalWrite(greenLedPin, HIGH);
   delay(100);
   digitalWrite(greenLedPin, LOW);
+}
+
+// Interrupt Service Routine for card detection
+void cardDetectedISR() {
+  cardPresent = true;
 }
 
 void loop() {
@@ -109,15 +129,14 @@ void loop() {
     lastRC522Check = millis();
   }
 
-  // Check for cards
-  configureSPI_RC522();
-  
-  // Two-step card detection for better reliability
-  if (rfid.PICC_IsNewCardPresent()) {
-    delay(10); // Short delay for card stabilization
+  // Check for cards using IRQ
+  if (cardPresent) {
+    configureSPI_RC522();
     if (rfid.PICC_ReadCardSerial()) {
       handleCardDetection();
     }
+    cardPresent = false;
+    rfid.PCD_WriteRegister(rfid.ComIrqReg, 0x7F); // Clear interrupt flags
   }
 
   // Sleep for power saving (30ms gives good balance between power saving and responsiveness)
@@ -197,8 +216,28 @@ bool isCardAuthorized(uint32_t cardId) {
   return false;
 }
 
-void handleCardDetection() {
+void indicateAuthorizedCard() {
+  // Green LED on for 1 second
   digitalWrite(greenLedPin, HIGH);
+  // Successful beep
+  tone(BUZZER_PIN, 2000, 1000); // 2kHz tone for 1 second
+  delay(1000);
+  digitalWrite(greenLedPin, LOW);
+}
+
+void indicateUnauthorizedCard() {
+  // Red LED blink 3 times
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(redLedPin, HIGH);
+    // Error beep
+    tone(BUZZER_PIN, 400, 200); // 400Hz tone for 200ms
+    delay(200);
+    digitalWrite(redLedPin, LOW);
+    delay(200);
+  }
+}
+
+void handleCardDetection() {
   
   // Power up radio with extended stabilization
   configureSPI_RF24();
@@ -251,16 +290,17 @@ void handleCardDetection() {
   
   if (report) {
     Serial.println(F("Transmission successful"));
-    // Double blink green LED
-    digitalWrite(greenLedPin, LOW);
-    delay(50);
-    digitalWrite(greenLedPin, HIGH);
-    delay(50);
-    digitalWrite(greenLedPin, LOW);
+    // Indicate card authorization status
+    if (sensorData5.authorized) {
+      indicateAuthorizedCard();
+    } else {
+      indicateUnauthorizedCard();
+    }
   } else {
     Serial.println(F("Transmission failed"));
     digitalWrite(redLedPin, HIGH);
-    delay(100);
+    tone(BUZZER_PIN, 100, 500); // Error tone
+    delay(500);
     digitalWrite(redLedPin, LOW);
   }
   
