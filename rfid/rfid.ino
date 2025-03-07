@@ -44,7 +44,7 @@ struct CardUser {
 };
 
 const CardUser card_users[] = {
-  {0x2492600354, "Tim", true},    // Tim's card
+  {0x94921022, "Tim", true},    // Tim's card
   {0x87654321, "Guest", false}    // Example unauthorized card
 };
 const int num_cards = sizeof(card_users) / sizeof(card_users[0]);
@@ -60,14 +60,18 @@ bool rc522_initialized = false;
 unsigned long lastRC522Check = 0;
 const unsigned long RC522_CHECK_INTERVAL = 5000; // Check every 5 seconds
 
-// Match gateway's sensorData5 structure
-struct {
-  uint32_t card_id;
-  bool authorized;
-  float batt;
-  unsigned char sensor_id;
-  char user_name[16];  // Buffer for user name
-} sensorData5;
+// Match gateway's sensorData5 structure exactly
+#pragma pack(push, 1)  // Force 1-byte alignment
+struct RFIDData {
+  uint32_t card_id;    // 4 bytes
+  bool authorized;     // 1 byte
+  float batt;         // 4 bytes
+  uint8_t sensor_id;  // 1 byte
+  char user_name[16]; // 16 bytes
+} __attribute__((packed));
+#pragma pack(pop)  // Restore default packing
+
+static struct RFIDData sensorData5;
 
 // Function prototypes
 bool checkRC522Connection();
@@ -91,8 +95,9 @@ void setup() {
   digitalWrite(CSN_PIN, HIGH);
   
   Serial.begin(115200);
-  delay(100);
+  while (!Serial) { ; }  // Wait for serial port
   Serial.println(F("\n\nRFID Reader Starting..."));
+  Serial.println(F("Debug mode enabled"));
   
   // Initialize SPI bus with proper settings
   SPI.begin();
@@ -142,7 +147,7 @@ void loop() {
     }
   }
 
-  // Sleep for power saving (30ms gives good balance between power saving and responsiveness)
+  // Sleep for power saving
   LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF);
 }
 
@@ -154,17 +159,16 @@ bool checkRC522Connection() {
 
 void reinitRC522() {
   configureSPI_RC522();
-  rfid.PCD_Reset();     // Software reset the RC522
-  delay(50);            // Give it time to reset
-  rfid.PCD_Init();      // Initialize the RC522
-  delay(50);            // Give it time to initialize
+  rfid.PCD_Reset();
+  delay(50);
+  rfid.PCD_Init();
+  delay(50);
   
   if (checkRC522Connection()) {
     rc522_initialized = true;
     rfid.PCD_SetAntennaGain(rfid.RxGain_max);
     rfid.PCD_WriteRegister(rfid.TxModeReg, 0x00);
     rfid.PCD_WriteRegister(rfid.RxModeReg, 0x00);
-    // Reset ModWidthReg
     rfid.PCD_WriteRegister(rfid.ModWidthReg, 0x26);
     digitalWrite(redLedPin, LOW);
     Serial.println(F("RC522 initialized successfully"));
@@ -174,7 +178,6 @@ void reinitRC522() {
     Serial.println(F("RC522 initialization failed"));
   }
   
-  // Clear any pending interrupts
   rfid.PCD_WriteRegister(rfid.ComIrqReg, 0x7F);
 }
 
@@ -189,11 +192,11 @@ bool initRF24() {
   radio.enableDynamicPayloads();
   radio.setDataRate(RF24_250KBPS);
   radio.setRetries(15, 15);  // 15 retries, 15*250us delay
-  radio.setAutoAck(true);    // Enable auto-acknowledgements
-  radio.setCRCLength(RF24_CRC_16); // Use 16-bit CRC
+  radio.setAutoAck(true);
+  radio.setCRCLength(RF24_CRC_16);
   radio.stopListening();
   
-  // Verify channel is clear
+  // Verify RF24 settings
   radio.startListening();
   delayMicroseconds(250);
   radio.stopListening();
@@ -204,7 +207,6 @@ bool initRF24() {
 
 float readBatteryVoltage() {
   delay(5);  // Let voltage stabilize
-  
   int reading = analogRead(A2);
   float vout = (reading * VREF) / 1024.0;
   float voltage = vout * VOLTAGE_DIVIDER;
@@ -225,47 +227,21 @@ const CardUser* findCard(uint32_t cardId) {
   return nullptr;
 }
 
-bool isCardAuthorized(uint32_t cardId) {
-  const CardUser* user = findCard(cardId);
-  return user ? user->authorized : false;
-}
-
-void indicateAuthorizedCard() {
-  // Green LED on for 1 second
-  digitalWrite(greenLedPin, HIGH);
-  // Successful beep
-  tone(BUZZER_PIN, 2000, 1000); // 2kHz tone for 1 second
-  delay(1000);
-  digitalWrite(greenLedPin, LOW);
-}
-
-void indicateUnauthorizedCard() {
-  // Red LED blink 3 times
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(redLedPin, HIGH);
-    // Error beep
-    tone(BUZZER_PIN, 400, 200); // 400Hz tone for 200ms
-    delay(200);
-    digitalWrite(redLedPin, LOW);
-    delay(200);
-  }
-}
-
 void handleCardDetection() {
-  // Start LED and buzzer for 1 second of card detection feedback
-  digitalWrite(greenLedPin, HIGH);
-  tone(BUZZER_PIN, 2000); // 2kHz tone
+  Serial.println(F("\n--- Card Detection Started ---"));
   
-  // Save the start time
+  digitalWrite(greenLedPin, HIGH);
+  tone(BUZZER_PIN, 2000);
+  
   unsigned long startTime = millis();
   
-  // Power up radio with extended stabilization
+  // Power up radio with stabilization
+  Serial.println(F("Powering up RF24..."));
   configureSPI_RF24();
   radio.powerUp();
-  delay(10);  // Extended stabilization time
+  delay(20);
   
   configureSPI_RC522();
-  // Convert UID to single uint32_t
   uint32_t cardId = 0;
   for (byte i = 0; i < rfid.uid.size; i++) {
     cardId = (cardId << 8) | rfid.uid.uidByte[i];
@@ -274,31 +250,41 @@ void handleCardDetection() {
   Serial.print(F("Card detected! ID: "));
   Serial.println(cardId);
   
-  // Look up card user
   const CardUser* user = findCard(cardId);
+  memset(&sensorData5, 0, sizeof(sensorData5));
+  
   sensorData5.card_id = cardId;
+  sensorData5.sensor_id = 1;
+  sensorData5.batt = readBatteryVoltage();
   
   if (user) {
     strncpy(sensorData5.user_name, user->user_name, sizeof(sensorData5.user_name) - 1);
-    sensorData5.user_name[sizeof(sensorData5.user_name) - 1] = '\0';  // Ensure null termination
+    sensorData5.user_name[sizeof(sensorData5.user_name) - 1] = '\0';
     sensorData5.authorized = user->authorized;
   } else {
     strncpy(sensorData5.user_name, "Unknown", sizeof(sensorData5.user_name));
     sensorData5.authorized = false;
   }
   
-  sensorData5.batt = readBatteryVoltage();
+  Serial.print(F("Sending data: ID="));
+  Serial.print(sensorData5.card_id);
+  Serial.print(F(" User="));
+  Serial.print(sensorData5.user_name);
+  Serial.print(F(" Auth="));
+  Serial.println(sensorData5.authorized ? "yes" : "no");
   
-  // Switch to RF24 SPI configuration and send data
+  // Switch to RF24 and send data
   configureSPI_RF24();
+  radio.stopListening();
   
-  // Try transmission with improved error handling
   bool report = false;
+  radio.flush_tx();
+  
   for(int i = 0; i < 5 && !report; i++) {
-    // Clear any stale data
-    radio.flush_tx();
+    Serial.print(F("Transmission attempt "));
+    Serial.print(i + 1);
+    Serial.print(F(" of 5... "));
     
-    // Verify channel is still clear
     radio.startListening();
     delayMicroseconds(250);
     radio.stopListening();
@@ -306,60 +292,67 @@ void handleCardDetection() {
     report = radio.write(&sensorData5, sizeof(sensorData5));
     
     if(!report) {
-      delay(100);  // Longer delay between retries
+      Serial.println(F("Failed"));
+      delay(100);
       
-      // Re-initialize radio if multiple failures
       if(i == 2) {
+        Serial.println(F("Reinitializing radio..."));
         radio.powerDown();
         delay(10);
         initRF24();
         radio.powerUp();
         delay(10);
       }
+    } else {
+      Serial.println(F("Success!"));
     }
   }
   
   if (report) {
     Serial.println(F("Transmission successful"));
   } else {
-    Serial.println(F("Transmission failed"));
+    Serial.println(F("All transmission attempts failed"));
     digitalWrite(redLedPin, HIGH);
     delay(100);
     digitalWrite(redLedPin, LOW);
   }
   
-  // Calculate how much time is left from the 1 second
   unsigned long elapsedTime = millis() - startTime;
   if (elapsedTime < 1000) {
-    delay(1000 - elapsedTime); // Wait the remaining time
+    delay(1000 - elapsedTime);
   }
   
-  // Turn off green LED and buzzer
   digitalWrite(greenLedPin, LOW);
   noTone(BUZZER_PIN);
   
-  // Clean up with improved timing
   configureSPI_RC522();
   rfid.PICC_HaltA();
   rfid.PCD_StopCrypto1();
   
   configureSPI_RF24();
   radio.flush_tx();
-  delay(10);  // Wait before power down
+  delay(10);
   radio.powerDown();
 
-  // Extended delay to ensure complete cycle
   delay(500);
+  
+  Serial.println(F("--- Card Detection Completed ---\n"));
 }
 
 void configureSPI_RC522() {
+  SPI.endTransaction();
   SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
   digitalWrite(CSN_PIN, HIGH);  // Deselect RF24
+  delayMicroseconds(5);
   digitalWrite(SS_PIN, LOW);    // Select RC522
+  delayMicroseconds(5);
 }
 
 void configureSPI_RF24() {
+  SPI.endTransaction();
   SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
   digitalWrite(SS_PIN, HIGH);   // Deselect RC522
+  delayMicroseconds(5);
   digitalWrite(CSN_PIN, LOW);   // Select RF24
+  delayMicroseconds(5);
 }

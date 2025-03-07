@@ -29,14 +29,14 @@ sensor:
   - platform: mqtt
     name: "RFID Reader 1"
     state_topic: "rf24/rfid1"
-    value_template: "{{ value_json.user_name }}"
+    value_template: "{{ value_json['user_name'] | default('None') }}"
     json_attributes_topic: "rf24/rfid1"
     json_attributes_template: >-
       {
-        "card_id": {{ value_json.card_id }},
-        "authorized": {{ value_json.authorized }},
-        "battery": {{ value_json.batt }},
-        "battery_percentage": {{ value_json.batt_perc }},
+        "card_id": "{{ value_json.card_id }}",
+        "authorized": {{ value_json.authorized | default('false') }},
+        "battery": {{ value_json.batt | default(0) }},
+        "battery_percentage": {{ value_json.batt_perc | default(0) }},
         "last_retry_count": {{ value_json.retries | default(0) }},
         "signal_quality": {{ value_json.signal | default(0) }}
       }

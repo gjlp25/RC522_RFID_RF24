@@ -1,518 +1,428 @@
 /*
-  RF24 GATEWAY BY DANIEL VERHAAL
-  MQTT CLIENT FOR NRF24L01+ BASED SENSORS
-
-
-  V3 - Adds heartbeat function
-     - Adds solar sensor (id=99)
-
-  V3.1 - Adds OTA!
-
-  NOTE: In file "C:\Users\...\AppData\Local\Arduino15\packages\esp8266\hardware\esp8266\...\platform.txt"
-  change line: tools.esptool.upload.network_pattern="{network_cmd}" "{runtime.platform.path}/tools/espota.py" -i "{serial.port}" -p "{network.port}" "--auth={network.password}" -f "{build.path}/{build.project_name}.bin"
-  to: tools.esptool.upload.network_pattern="{network_cmd}" "{runtime.platform.path}/tools/espota.py" -i "{serial.port}" -p "{network.port}" -P 8266 "--auth={network.password}" -f "{build.path}/{build.project_name}.bin"
-  this way the LISTENING port on your development pc is fixed to 8266 (of course you can change it) and you can write a rule on your firewall
-
-  V4.0 - Code overhaul. Using JSON format for temp, door and pir sensor code including smart topic and payloat creation.
-         No need for defining topics anymore for temp, door and pir sensors.
-         Changes needed in Hassio: Now only 1 mqtt message per sensor which includes attributes (like battery info).
-  
-  V4.1 - Added battery percentage calculation for TEMP, DOOR & PIR sensors (DOORBELL update WIP)
-       - Battery percentage value included in json transmission
-  
-  V4.2 - Added retain flag to some MQTT transmissions in order for hassio to save last value after restart
-       - Code cleanup
+  RF24 Gateway by Daneel Verhaall
+  MQTT Client for NRF24L01+ Based Sensors
 */
 
-/*===========================================================
- ********** DEBUG ON/OFF
-  ===========================================================*/
+#include <SPI.h>
+#include <RF24.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <ESP8266mDNS.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 
-#define DEBUG false                         // flag to turn on/off debugging
-#define Serial if(DEBUG)Serial              // if DEBUG is false, Serial is undefined
+// Network configuration
+#define wifi_ssid "WiCaRo_IoT"
+#define wifi_password "Test@2021"
+#define mqtt_server "10.0.30.29"
+#define mqtt_user "mqtt_gjlp25"
+#define mqtt_password "o67@4ZeNSq&3k8"
 
-/*===========================================================
- ********** INCLUSIONS
-  ===========================================================*/
+// Pin definitions
+#define CE_PIN D2
+#define CSN_PIN D8
+const int ledRed = D0;
+const int ledGreen = D1;
 
-#include <SPI.h>                            // needed for nRF24L01
-#include "nRF24L01.h"                       // nRF24L01 #1
-#include "RF24.h"                           // nRF24L01 #2
+// RF24 initialization
+RF24 radio(CE_PIN, CSN_PIN);
+const uint64_t pipe01 = 0xE7E8C0F0B1LL;
+const uint64_t pipe02 = 0xE7E8C0F0B2LL;
+const uint64_t pipe03 = 0xE7E8C0F0B3LL;
+const uint64_t pipe04 = 0xE7E8C0F0B4LL;
+const uint64_t pipe05 = 0xE7E8C0F0B5LL;
 
-#include <ESP8266WiFi.h>                    // ESP8266 library
-#include <PubSubClient.h>                   // needed for MQTT
+// MQTT client
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-#include <ESP8266mDNS.h>                    // needed for OTA function
-#include <WiFiUdp.h>                        // needed for OTA function
-#include <ArduinoOTA.h>                     // needed for OTA function 
+// Topic strings
+const char *myTopics[] = {"temp", "doorbell", "door", "pir", "rfid"};
+const char *offOnState[] = {"off", "on"};
+const char *closedOpenState[] = {"closed", "open"};
 
-/*===========================================================
- ********** DEFINITIONS
-  ===========================================================*/
+// Struct definitions with proper packing
+#pragma pack(push, 1)
 
-#define wifi_ssid "WiCaRo_IoT"             // define SSID
-#define wifi_password "Test@2021"        // define Wifi Password
+struct TempData {
+    float temp;         // 4 bytes
+    float hum;          // 4 bytes
+    float pres;         // 4 bytes
+    float batt;         // 4 bytes
+    uint8_t sensor_id;  // 1 byte
+} __attribute__((packed));
 
-#define mqtt_server "10.0.30.29"           // define MQTT server IP
-#define mqtt_user "mqtt_gjlp25"                    // define MQTT user
-#define mqtt_password "o67@4ZeNSq&3k8"            // define MQTT password
+struct DoorBellData {
+    float batt;         // 4 bytes
+    uint8_t doorbell;   // 1 byte
+} __attribute__((packed));
 
+struct DoorData {
+    float batt;         // 4 bytes
+    uint8_t sensor_id;  // 1 byte
+    bool door;          // 1 byte
+} __attribute__((packed));
 
-unsigned long currentMillis;                // long for current time
-long previousMillis1 = 0;                   // for storing last time #1
-long previousMillis3 = 0;                   // for storing last time #2
-const long interval1 = 2000;                // interval for doorbell_flag
-const long interval2 = 5000;                // interval for mqtt initialization
-const long interval3 = 30000;               // interval for heartbeat
+struct PIRData {
+    float batt;         // 4 bytes
+    uint8_t sensor_id;  // 1 byte
+    bool motion;        // 1 byte
+} __attribute__((packed));
 
-boolean heartbeat = 1;                      // heartbeat for letting Hassio know Gateway is online
-boolean doorbell_flag = false;              // flag for indicating whether doorbell is active or not
+struct RFIDData {
+    uint32_t card_id;   // 4 bytes
+    bool authorized;    // 1 byte
+    float batt;         // 4 bytes
+    uint8_t sensor_id;  // 1 byte
+    char user_name[16]; // 16 bytes
+} __attribute__((packed));
 
-int ledRed = D0;                            // pin for red status LED connection
-int ledGreen = D1;                          // pin for green status LED connection
-int ledState = LOW;                         // int for letting status LED blink
+#pragma pack(pop)
 
-int topic;                                  // used to store rf24 pipeline info
+// Global sensor data instances
+static struct TempData sensorData1;
+static struct DoorBellData sensorData2;
+static struct DoorData sensorData3;
+static struct PIRData sensorData4;
+static struct RFIDData sensorData5;
 
-char *myTopics[] = {"temp", "doorbel", "door", "pir", "rfid"};  // for topic string creation (0=temp, 1=doorbell etc)
-char *offOnState[] = {"off", "on"};                     // used for mqtt payload
-char *closedOpenState[] = {"closed", "open"};           // used for mqtt payload
-
-/*===========================================================
- ********** MQTT TOPICS
-
-   All relevant MQTT topics to be defines below.
-   Which can be read in Hass.io or something similar
-  ===========================================================*/
-
-#define gateway_topic "gateway/heartbeat"
-
-#define doorbell_topic "rf24/doorbell"
-#define doorbell_batt_topic "rf24/doorbell_batt"
-#define doorbell_flag_topic "rf24/doorbell_flag"
-
-
-/*===========================================================
- ********** WIFI & RF24 INITIALIZATION
-  ===========================================================*/
-
-WiFiClient espClient;                     // initializing ESP8266
-PubSubClient client(espClient);           // initializing MQTT client
-
-RF24 radio(D2, D8);                       // initializing RF24 and defining CE & CSN
-
-const uint64_t pipe01 = 0xE7E8C0F0B1LL;   // RF24 address for temp sensors
-const uint64_t pipe02 = 0xE7E8C0F0B2LL;   // RF24 address for doorbell
-const uint64_t pipe03 = 0xE7E8C0F0B3LL;   // RF24 address for door sensors
-const uint64_t pipe04 = 0xE7E8C0F0B4LL;   // RF24 address for PIR sensors
-const uint64_t pipe05 = 0xE7E8C0F0B5LL;   // RF24 address for RFID sensors
-
-
-/*===========================================================
- ********** STRUCTURES
-
-   Same data structures should be used in relevant sensor code.
-  ===========================================================*/
-
-//STRUCTURE FOR TEMP SENSORS
-struct {
-  float temp;
-  float hum;
-  float pres;
-  float batt;
-  unsigned char sensor_id;
-} sensorData1;
-
-//STRUCTURE FOR DOORBELL
-struct {
-  float batt;
-  byte doorbell;
-} sensorData2;
-
-//STRUCTURE FOR DOOR SENSORS
-struct {
-  float batt;
-  unsigned char sensor_id;
-  boolean door;
-} sensorData3;
-
-//STRUCTURE FOR PIR SENSORS
-struct {
-  float batt;
-  unsigned char sensor_id;
-  boolean motion;
-} sensorData4;
-
-//STRUCTURE FOR RFID SENSORS
-struct {
-  uint32_t card_id;
-  bool authorized;
-  float batt;
-  unsigned char sensor_id;
-  char user_name[16];  // Added user name field
-} sensorData5;
-
-/*===========================================================
- ********** BATTERY PERCENTAGE CALCULATION
-  ===========================================================*/
-  
+// Global variables
 float sensorBatt;
+int topic;
+bool heartbeat = true;
+bool doorbell_flag = false;
+int ledState = LOW;
 
-float battery_perc() {
-  float output = ((sensorBatt - 3.3) / (4.2 - 3.3)) * 100;
+unsigned long currentMillis;
+long previousMillis1 = 0;
+long previousMillis3 = 0;
+const long interval1 = 2000;
+const long interval2 = 5000;
+const long interval3 = 30000;
 
-  if (output < 100)
-    return output;
-  else
-    return 100.0f;
-}
+// Function prototypes
+void setup_wifi();
+void reconnect();
+float battery_perc();
+void MQTT_sensorData1();
+void MQTT_sensorData2();
+void MQTT_sensorData3();
+void MQTT_sensorData4();
+void MQTT_sensorData5();
+void handle_rfid(uint8_t bytes);
 
-/*===========================================================
- ********** SETUP
-  ===========================================================*/
-
-void setup() {
-  Serial.begin(9600);
-
-  pinMode(ledGreen, OUTPUT);
-  pinMode(ledRed, OUTPUT);
-
-  digitalWrite(ledGreen, LOW);
-  digitalWrite(ledRed, HIGH);
-
-  setup_wifi();
-
-  ArduinoOTA.setPassword((const char *)"password");
-  ArduinoOTA.setHostname("RF24Gateway");
-  ArduinoOTA.onError([](ota_error_t error) {
-    ESP.restart();
-  });
-  ArduinoOTA.begin();
-
-  client.setServer(mqtt_server, 1883);
-
-
-  radio.begin();
-  //  radio.setPayloadSize(8);
-  radio.setChannel(108);
-  radio.openReadingPipe(1, pipe01);
-  radio.openReadingPipe(2, pipe02);
-  radio.openReadingPipe(3, pipe03);
-  radio.openReadingPipe(4, pipe04);
-  radio.openReadingPipe(5, pipe05);
-  radio.setPALevel(RF24_PA_HIGH);
-  radio.enableDynamicPayloads();
-  radio.setDataRate(RF24_250KBPS);
-  radio.startListening();
-}
-
-/*===========================================================
- ********** WIFI CONNECTION & RE-CONNECTION
-  =============================================================*/
-
+// WiFi setup function
 void setup_wifi() {
-  digitalWrite(ledRed, HIGH);
-  digitalWrite(ledGreen, LOW);
-  delay(10);
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(wifi_ssid);
+    Serial.println(F("\nSetting up WiFi..."));
+    digitalWrite(ledRed, HIGH);  // Red LED on during WiFi connection
 
-  WiFi.mode(WIFI_STA);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(wifi_ssid, wifi_password);
 
-  WiFi.begin(wifi_ssid, wifi_password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    if (ledState == LOW) {
-      ledState = HIGH;
-    } else {
-      ledState = LOW;
-    }
-    // set the LED with the ledState of the variable:
-    digitalWrite(ledRed, ledState);
-    delay(1000);
-    Serial.print(".");
-  }
-  digitalWrite(ledRed, HIGH);
-  digitalWrite(ledGreen, HIGH);
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-}
-
-void reconnect() {
-  // Loop until we're reconnected
-
-  while (WiFi.status() != WL_CONNECTED) {
-    if (ledState == LOW) {
-      ledState = HIGH;
-    } else {
-      ledState = LOW;
-    }
-    // set the LED with the ledState of the variable:
-    digitalWrite(ledRed, ledState);
-    digitalWrite(ledGreen, LOW);
-    delay(1000);
-    Serial.print(".");
-  }
-
-  while (!client.connected()) {
-    digitalWrite(ledRed, HIGH);
-    digitalWrite(ledGreen, HIGH);
-    Serial.print("Attempting MQTT connection...");
-    // Attempt to connect
-    // If you do not want to use a username and password, change next line to
-    // if (client.connect("ESP8266Client2")) {
-    if (client.connect("RF24Gateway", mqtt_user, mqtt_password)) {
-      digitalWrite(ledRed, LOW);
-      digitalWrite(ledGreen, HIGH);
-      Serial.println("connected");
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" try again in 5 seconds");
-
-      // Wait 5 seconds before retrying
-      currentMillis = millis();
-      previousMillis1 = currentMillis;
-      while (currentMillis - previousMillis1 <= interval2) {
-        currentMillis = millis();
-
-        // if the LED is off turn it on and vice-versa:
-        if (ledState == LOW) {
-          ledState = HIGH;
-        } else {
-          ledState = LOW;
-        }
-
-        // set the LED with the ledState of the variable:
-        digitalWrite(ledRed, ledState);
-        digitalWrite(ledGreen, ledState);
+    while (WiFi.status() != WL_CONNECTED) {
         delay(500);
-      }
+        Serial.print(F("."));
+        // Blink red LED while connecting
+        digitalWrite(ledRed, !digitalRead(ledRed));
     }
-  }
+
+    digitalWrite(ledRed, LOW);  // Turn off red LED once connected
+    Serial.println(F("\nWiFi connected"));
+    Serial.print(F("IP address: "));
+    Serial.println(WiFi.localIP());
 }
 
-/*===========================================================
- ********** MAIN LOOP
-  ===========================================================*/
-
-void loop() {
-
-  ArduinoOTA.handle();                                        // check for OTA update
-
-  if (!client.connected()) {
-    reconnect();
-  }
-  client.loop();
-
-  byte pipeRxd;
-  if (radio.available(&pipeRxd)) {
-    topic = pipeRxd;
+// MQTT reconnect function
+void reconnect() {
+    Serial.println(F("Attempting MQTT connection..."));
+    digitalWrite(ledRed, HIGH);  // Red LED on during reconnection
     
-    if (topic == 1) {
-      radio.read(&sensorData1, sizeof(sensorData1));
-      MQTT_sensorData1();
+    // Loop until we're reconnected
+    while (!client.connected()) {
+        // Create a random client ID
+        String clientId = "ESP8266Client-";
+        clientId += String(random(0xffff), HEX);
+        
+        // Attempt to connect
+        if (client.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
+            Serial.println(F("Connected to MQTT broker"));
+            // Once connected, publish an announcement
+            client.publish("gateway/status", "online", true);
+        } else {
+            Serial.print(F("Failed to connect, rc="));
+            Serial.print(client.state());
+            Serial.println(F(" retrying in 5 seconds"));
+            // Blink red LED while waiting
+            digitalWrite(ledRed, !digitalRead(ledRed));
+            delay(5000);
+        }
     }
-    else if (topic == 2) {
-      radio.read(&sensorData2, sizeof(sensorData2));
-      MQTT_sensorData2();
-    }
-    else if (topic == 3) {
-      radio.read(&sensorData3, sizeof(sensorData3));
-      MQTT_sensorData3();
-    }
-    else if (topic == 4) {
-      radio.read(&sensorData4, sizeof(sensorData4));
-      MQTT_sensorData4();
-    }
-    else if (topic == 5) {
-      radio.read(&sensorData5, sizeof(sensorData5));
-      MQTT_sensorData5();
-    }
-  }
-
-//=========DOORBEL-OFF SIGNAL FUNCTION=======================
-
-  currentMillis = millis();
-
-  if (doorbell_flag == true) {
-    if (currentMillis - previousMillis1 > interval1) {
-      doorbell_flag = false;
-      client.publish(doorbell_flag_topic, "off", true);
-      previousMillis1 = 0;
-    }
-  }
-
-//=========GATEWAY HEARTBEAT SIGNAL FUNCTION=================
-
-  if (currentMillis - previousMillis3 > interval3) {
-    if (heartbeat == 1) {
-      client.publish(gateway_topic, "on");
-      heartbeat = 0;
-      previousMillis3 = millis();
-    }
-    else {
-      client.publish(gateway_topic, "off");
-      heartbeat = 1;
-      previousMillis3 = millis();
-    }
-  }
+    
+    digitalWrite(ledRed, LOW);  // Turn off red LED once connected
 }
 
-/*===========================================================
- ********** MQTT DATA 1 (TEMP/HUM/PRESS)
-  ===========================================================*/
+// Battery percentage calculation
+float battery_perc() {
+    float output = ((sensorBatt - 3.3) / (4.2 - 3.3)) * 100;
+    return output < 100 ? output : 100.0f;
+}
 
+// MQTT publish function for RFID data
+void MQTT_sensorData5() {
+    char mqtt_message[256];
+    char card_id_str[16];
+    snprintf(card_id_str, sizeof(card_id_str), "0x%08X", sensorData5.card_id);
+    
+    // Calculate battery percentage
+    sensorBatt = sensorData5.batt;
+    float batt_percentage = battery_perc();
+    
+    // Create JSON message with all required fields
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"card_id\":\"%s\","
+        "\"user_name\":\"%s\","
+        "\"authorized\":%s,"
+        "\"batt\":%.2f,"
+        "\"batt_perc\":%.1f,"
+        "\"retries\":0,"
+        "\"signal\":100,"
+        "\"connected\":true}",
+        card_id_str,
+        sensorData5.user_name,
+        sensorData5.authorized ? "true" : "false",
+        sensorData5.batt,
+        batt_percentage
+    );
+    
+    // Publish to MQTT
+    client.publish("rf24/rfid1", mqtt_message, true);
+    
+    // Debug output
+    Serial.println(F("Published RFID data to MQTT:"));
+    Serial.println(mqtt_message);
+}
+
+// Placeholder functions for other sensor types
 void MQTT_sensorData1() {
-  char tempString[5];
-  dtostrf(sensorData1.temp, 1, 1, tempString);
-
-  char humString[5];
-  dtostrf(sensorData1.hum, 1, 1, humString);
-
-  char presString[7];
-  dtostrf((sensorData1.pres / 100), 1, 1, presString);
-
-  sensorBatt = sensorData1.batt;
-  char battPercString[1];
-  dtostrf(battery_perc(), 1, 0, battPercString);
-
-  char battString[5];
-  dtostrf(sensorData1.batt, 1, 2, battString);
-
-  String topicString = "rf24/" + String(myTopics[topic - 1]) + String(sensorData1.sensor_id);
-//  int length = topicString.length();
-  const char *topicBuffer;
-  topicBuffer = topicString.c_str();
-
-  String payloadString = "{\"temp\":\"" + String(tempString) + "\",\"hum\":\"" + String(humString) + "\",\"press\":\"" + String(presString) + "\",\"batt\":\"" + String(battString) + "\",\"batt_perc\":\"" + String(battPercString) + "\"}";
-//  length = payloadString.length();
-  const char *payloadBuffer;
-  payloadBuffer = payloadString.c_str();
-
-  client.publish(topicBuffer, payloadBuffer);
+    // Temperature sensor data
+    char mqtt_message[128];
+    sensorBatt = sensorData1.batt;
+    
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"temp\":%.2f,\"hum\":%.2f,\"pres\":%.2f,\"batt\":%.2f,\"batt_perc\":%.1f}",
+        sensorData1.temp, sensorData1.hum, sensorData1.pres, sensorData1.batt, battery_perc());
+    
+    char topic[32];
+    snprintf(topic, sizeof(topic), "rf24/temp%d", sensorData1.sensor_id);
+    client.publish(topic, mqtt_message, true);
 }
-
-
-/*===========================================================
- ********** MQTT DATA 2 (DOORBELL)
-  ===========================================================*/
 
 void MQTT_sensorData2() {
-
-  if (sensorData2.doorbell == 1) {
-    client.publish(doorbell_topic, "on");
-  }
-
-  else if (sensorData2.doorbell == 0) {
-    client.publish(doorbell_topic, "off", true);
-    char battString[5];
-    dtostrf(sensorData2.batt, 1, 2, battString);
-    client.publish(doorbell_batt_topic, battString, true);
-  }
-
-  else if (sensorData2.doorbell == 2) {
-    client.publish(doorbell_flag_topic, "on");
-    previousMillis1 = millis();
-    doorbell_flag = true;
-  }
+    // Doorbell sensor data
+    sensorBatt = sensorData2.batt;
+    if (sensorData2.doorbell == 1) {
+        client.publish("rf24/doorbell_flag", "on", true);
+        doorbell_flag = true;
+        previousMillis1 = millis();
+    }
 }
-
-
-/*===========================================================
- ********** MQTT DATA 3 (DOOR-SENSOR)
-  ===========================================================*/
 
 void MQTT_sensorData3() {
-
-  String topicString = "rf24/" + String(myTopics[topic - 1]) + String(sensorData3.sensor_id);
-//  int length = topicString.length();
-  const char *topicBuffer;
-  topicBuffer = topicString.c_str();
-
-  sensorBatt = sensorData3.batt;
-  char battPercString[1];
-  dtostrf(battery_perc(), 1, 0, battPercString); 
-
-  char battString[5];
-  dtostrf(sensorData3.batt, 1, 2, battString);
-
-  String payloadString = "{\"door\":\"" + String(closedOpenState[sensorData3.door]) + "\",\"batt\":\"" + String(battString) + "\",\"batt_perc\":\"" + String(battPercString) + "\"}";
-//  length = payloadString.length();
-  const char *payloadBuffer;
-  payloadBuffer = payloadString.c_str();
-
-  client.publish(topicBuffer, payloadBuffer, true);
+    // Door sensor data
+    char mqtt_message[128];
+    sensorBatt = sensorData3.batt;
+    
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"door\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f}",
+        sensorData3.door ? "open" : "closed", sensorData3.batt, battery_perc());
+    
+    char topic[32];
+    snprintf(topic, sizeof(topic), "rf24/door%d", sensorData3.sensor_id);
+    client.publish(topic, mqtt_message, true);
 }
 
-
-/*===========================================================
- ********** MQTT DATA 4 (PIR)
-  ===========================================================*/
-  
 void MQTT_sensorData4() {
-
-  String topicString = "rf24/" + String(myTopics[topic - 1]) + String(sensorData4.sensor_id);
-//  int length = topicString.length();
-  const char *topicBuffer;
-  topicBuffer = topicString.c_str();
-
-  sensorBatt = sensorData4.batt;
-  char battPercString[1];
-  dtostrf(battery_perc(), 1, 0, battPercString); 
-
-  char battString[5];
-  dtostrf(sensorData4.batt, 1, 2, battString);
- 
-  String payloadString = "{\"motion\":\"" + String(offOnState[sensorData4.motion]) + "\",\"batt\":\"" + String(battString) + "\",\"batt_perc\":\"" + String(battPercString) + "\"}";
-//  length = payloadString.length();
-  const char *payloadBuffer;
-  payloadBuffer = payloadString.c_str();
-
-  client.publish(topicBuffer, payloadBuffer, true);
+    // PIR motion sensor data
+    char mqtt_message[128];
+    sensorBatt = sensorData4.batt;
+    
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"motion\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f}",
+        sensorData4.motion ? "detected" : "clear", sensorData4.batt, battery_perc());
+    
+    char topic[32];
+    snprintf(topic, sizeof(topic), "rf24/pir%d", sensorData4.sensor_id);
+    client.publish(topic, mqtt_message, true);
 }
 
-/*===========================================================
- ********** MQTT DATA 5 (RFID)
-  ===========================================================*/
-  
-void MQTT_sensorData5() {
-  String topicString = "rf24/" + String(myTopics[topic - 1]) + String(sensorData5.sensor_id);
-  const char *topicBuffer;
-  topicBuffer = topicString.c_str();
+// Improved RFID handling function
+void handle_rfid(uint8_t bytes) {
+    Serial.println(F("\n=== RF24 Debug Info ==="));
+    
+    // Print memory layout info first
+    Serial.println(F("Memory Layout:"));
+    Serial.print(F("- Expected struct size: ")); Serial.println(sizeof(sensorData5));
+    Serial.print(F("- Received data size:  ")); Serial.println(bytes);
+    Serial.println(F("Struct field sizes:"));
+    Serial.print(F("- card_id:    ")); Serial.println(sizeof(sensorData5.card_id));
+    Serial.print(F("- authorized: ")); Serial.println(sizeof(sensorData5.authorized));
+    Serial.print(F("- batt:      ")); Serial.println(sizeof(sensorData5.batt));
+    Serial.print(F("- sensor_id:  ")); Serial.println(sizeof(sensorData5.sensor_id));
+    Serial.print(F("- user_name:  ")); Serial.println(sizeof(sensorData5.user_name));
+    
+    // Verify size matches
+    if (bytes != sizeof(sensorData5)) {
+        Serial.println(F("Error: Size mismatch between sender and receiver!"));
+        radio.flush_rx();
+        return;
+    }
 
-  sensorBatt = sensorData5.batt;
-  char battPercString[1];
-  dtostrf(battery_perc(), 1, 0, battPercString);
+    // Read the data with SPI protection
+    SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
+    digitalWrite(CSN_PIN, LOW);
+    delayMicroseconds(5);
+    radio.read(&sensorData5, sizeof(sensorData5));
+    digitalWrite(CSN_PIN, HIGH);
+    delayMicroseconds(5);
+    SPI.endTransaction();
 
-  char battString[5];
-  dtostrf(sensorData5.batt, 1, 2, battString);
+    // Print received data for debugging
+    Serial.println(F("\nReceived Data:"));
+    Serial.print(F("- Card ID: 0x")); Serial.println(sensorData5.card_id, HEX);
+    Serial.print(F("- User: '")); Serial.print(sensorData5.user_name); Serial.println("'");
+    Serial.print(F("- Auth: ")); Serial.println(sensorData5.authorized ? "Yes" : "No");
+    Serial.print(F("- Batt: ")); Serial.println(sensorData5.batt);
+    Serial.print(F("- Sensor: ")); Serial.println(sensorData5.sensor_id);
 
-  char cardIdString[11];
-  sprintf(cardIdString, "%lu", sensorData5.card_id);
-  
-  // Calculate signal quality based on retry count
-  int retryCount = radio.getARC(); // Get Auto Retry Count
-  int signalQuality = 100;
-  if(retryCount > 0) {
-    signalQuality = max(0, 100 - (retryCount * 20)); // Reduce quality by 20% per retry
-  }
- 
-  String payloadString = "{\"card_id\":\"" + String(cardIdString) + 
-                        "\",\"user_name\":\"" + String(sensorData5.user_name) + 
-                        "\",\"authorized\":\"" + String(sensorData5.authorized ? "true" : "false") + 
-                        "\",\"batt\":\"" + String(battString) + 
-                        "\",\"batt_perc\":\"" + String(battPercString) + 
-                        "\",\"retries\":\"" + String(retryCount) + 
-                        "\",\"signal\":\"" + String(signalQuality) + 
-                        "\",\"connected\":\"" + String(radio.isChipConnected() ? "true" : "false") + 
-                        "\"}";
-  const char *payloadBuffer;
-  payloadBuffer = payloadString.c_str();
+    // If we got here, everything worked - send to MQTT
+    MQTT_sensorData5();
+    Serial.println(F("RFID processing completed successfully"));
+}
 
-  client.publish(topicBuffer, payloadBuffer, true);
+void setup() {
+    // Initialize hardware
+    pinMode(ledGreen, OUTPUT);
+    pinMode(ledRed, OUTPUT);
+    pinMode(CSN_PIN, OUTPUT);
+    digitalWrite(CSN_PIN, HIGH);
+    digitalWrite(ledRed, HIGH);    // Red LED on during startup
+    digitalWrite(ledGreen, LOW);   // Green LED off initially
+
+    // Start serial and wait for it to be ready
+    Serial.begin(115200);
+    delay(100);  // Give serial port time to initialize
+    Serial.println(F("\n\nRF24 Gateway Starting..."));
+
+    setup_wifi();
+    
+    Serial.println(F("Initializing RF24 radio..."));
+    if (!radio.begin()) {
+        Serial.println(F("RF24 init failed!"));
+        // Fast blink red LED to indicate RF24 init failure
+        while(1) {
+            digitalWrite(ledRed, !digitalRead(ledRed));
+            delay(200);
+        }
+    }
+    Serial.println(F("RF24 initialized successfully"));
+    
+    // Configure radio
+    Serial.println(F("Configuring radio settings..."));
+    radio.setChannel(108);
+    radio.openReadingPipe(1, pipe01);
+    radio.openReadingPipe(2, pipe02);
+    radio.openReadingPipe(3, pipe03);
+    radio.openReadingPipe(4, pipe04);
+    radio.openReadingPipe(5, pipe05);
+    radio.setPALevel(RF24_PA_HIGH);
+    radio.enableDynamicPayloads();
+    radio.setDataRate(RF24_250KBPS);
+    radio.setAutoAck(true);
+    radio.setCRCLength(RF24_CRC_16);
+    radio.startListening();
+    
+    // Print radio configuration
+    Serial.println(F("Radio configuration:"));
+    Serial.print(F("Channel: ")); Serial.println(108);
+    Serial.print(F("PA Level: ")); Serial.println("HIGH");
+    Serial.print(F("Data Rate: ")); Serial.println("250KBPS");
+    
+    // Setup MQTT and OTA
+    Serial.println(F("Setting up MQTT and OTA..."));
+    client.setServer(mqtt_server, 1883);
+    ArduinoOTA.begin();
+
+    // All initialization complete
+    digitalWrite(ledRed, LOW);     // Turn off red LED
+    digitalWrite(ledGreen, HIGH);  // Turn on green LED
+    Serial.println(F("Gateway initialization complete!"));
+}
+
+void loop() {
+    ArduinoOTA.handle();
+    
+    // Handle MQTT connection
+    if (!client.connected()) {
+        digitalWrite(ledGreen, LOW);  // Green LED off while disconnected
+        digitalWrite(ledRed, HIGH);   // Red LED on while disconnected
+        reconnect();
+        digitalWrite(ledRed, LOW);    // Red LED off when reconnected
+        digitalWrite(ledGreen, HIGH); // Green LED on when reconnected
+    }
+    client.loop();
+
+    // Check for radio data
+    byte pipeNum;
+    if (radio.available(&pipeNum)) {
+        digitalWrite(ledGreen, LOW);  // Turn off green LED during processing
+        topic = pipeNum;
+        
+        if (topic == 5) {  // RFID sensor
+            uint8_t bytes = radio.getDynamicPayloadSize();
+            handle_rfid(bytes);
+        }
+        else {  // Other sensors
+            switch(topic) {
+                case 1:
+                    radio.read(&sensorData1, sizeof(sensorData1));
+                    MQTT_sensorData1();
+                    break;
+                case 2:
+                    radio.read(&sensorData2, sizeof(sensorData2));
+                    MQTT_sensorData2();
+                    break;
+                case 3:
+                    radio.read(&sensorData3, sizeof(sensorData3));
+                    MQTT_sensorData3();
+                    break;
+                case 4:
+                    radio.read(&sensorData4, sizeof(sensorData4));
+                    MQTT_sensorData4();
+                    break;
+                default:
+                    radio.flush_rx();
+                    break;
+            }
+        }
+        digitalWrite(ledGreen, HIGH); // Turn green LED back on after processing
+    }
+
+    // Handle doorbell flag timeout
+    currentMillis = millis();
+    if (doorbell_flag && (currentMillis - previousMillis1 > interval1)) {
+        doorbell_flag = false;
+        client.publish("rf24/doorbell_flag", "off", true);
+        previousMillis1 = 0;
+    }
+
+    // Handle heartbeat
+    if (currentMillis - previousMillis3 > interval3) {
+        client.publish("gateway/heartbeat", heartbeat ? "on" : "off");
+        heartbeat = !heartbeat;
+        previousMillis3 = currentMillis;
+        // Blink green LED briefly to show heartbeat
+        digitalWrite(ledGreen, LOW);
+        delay(50);
+        digitalWrite(ledGreen, HIGH);
+    }
 }
