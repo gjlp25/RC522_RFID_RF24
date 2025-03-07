@@ -18,8 +18,6 @@
 // Define pins for RC522
 #define RST_PIN 5
 #define SS_PIN 4
-#define IRQ_PIN 2  // IRQ pin for RC522
-
 // Define pin for buzzer
 #define BUZZER_PIN 3
 
@@ -38,12 +36,18 @@ MFRC522 rfid(SS_PIN, RST_PIN);
 // Use pipe05 from gateway for RFID communications
 const uint64_t pipe05 = 0xE7E8C0F0B5LL;
 
-// Authorized card IDs (add your card IDs here)
-const uint32_t authorized_cards[] = {
-  0x2492600354,  // Example card 1
-  0x87654321   // Example card 2
+// Card to user mapping
+struct CardUser {
+  uint32_t card_id;
+  const char* user_name;
+  bool authorized;
 };
-const int num_authorized_cards = sizeof(authorized_cards) / sizeof(authorized_cards[0]);
+
+const CardUser card_users[] = {
+  {0x2492600354, "Tim", true},    // Tim's card
+  {0x87654321, "Guest", false}    // Example unauthorized card
+};
+const int num_cards = sizeof(card_users) / sizeof(card_users[0]);
 
 // Battery voltage calculation constants
 const float VREF = 3.3;  // Reference voltage of Arduino Pro Mini 3.3V
@@ -62,6 +66,7 @@ struct {
   bool authorized;
   float batt;
   unsigned char sensor_id;
+  char user_name[16];  // Buffer for user name
 } sensorData5;
 
 // Function prototypes
@@ -74,21 +79,26 @@ void handleCardDetection();
 void configureSPI_RC522();
 void configureSPI_RF24();
 
-// Interrupt flag
-volatile bool cardPresent = false;
-
 void setup() {
   pinMode(greenLedPin, OUTPUT);
   pinMode(redLedPin, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(IRQ_PIN, INPUT_PULLUP);
+  pinMode(SS_PIN, OUTPUT);
+  pinMode(CSN_PIN, OUTPUT);
+  
+  // Initial state for SPI pins
+  digitalWrite(SS_PIN, HIGH);
+  digitalWrite(CSN_PIN, HIGH);
   
   Serial.begin(115200);
   delay(100);
   Serial.println(F("\n\nRFID Reader Starting..."));
   
-  // Initialize SPI bus
+  // Initialize SPI bus with proper settings
   SPI.begin();
+  SPI.setBitOrder(MSBFIRST);
+  SPI.setDataMode(SPI_MODE0);
+  SPI.setClockDivider(SPI_CLOCK_DIV8); // Slower speed for reliability
   
   // Initialize RC522
   reinitRC522();
@@ -101,21 +111,10 @@ void setup() {
   
   sensorData5.sensor_id = 1;  // Set RFID reader ID
   
-  // Configure IRQ pin interrupt
-  attachInterrupt(digitalPinToInterrupt(IRQ_PIN), cardDetectedISR, FALLING);
-  
-  // Enable IRQ pin in RC522
-  rfid.PCD_WriteRegister(rfid.ComIEnReg, 0xA0); // Enable IRQ for card detect
-  
   Serial.println(F("System Ready"));
   digitalWrite(greenLedPin, HIGH);
   delay(100);
   digitalWrite(greenLedPin, LOW);
-}
-
-// Interrupt Service Routine for card detection
-void cardDetectedISR() {
-  cardPresent = true;
 }
 
 void loop() {
@@ -129,14 +128,18 @@ void loop() {
     lastRC522Check = millis();
   }
 
-  // Check for cards using IRQ
-  if (cardPresent) {
-    configureSPI_RC522();
+  // Reset RC522 for reliable card detection
+  configureSPI_RC522();
+  rfid.PCD_WriteRegister(rfid.ComIrqReg, 0x7F);    // Clear all interrupt bits
+  rfid.PCD_WriteRegister(rfid.FIFOLevelReg, 0x80); // Flush FIFO buffer
+  
+  // Basic card detection
+  if (rfid.PICC_IsNewCardPresent()) {
     if (rfid.PICC_ReadCardSerial()) {
       handleCardDetection();
+      rfid.PICC_HaltA();
+      rfid.PCD_StopCrypto1();
     }
-    cardPresent = false;
-    rfid.PCD_WriteRegister(rfid.ComIrqReg, 0x7F); // Clear interrupt flags
   }
 
   // Sleep for power saving (30ms gives good balance between power saving and responsiveness)
@@ -151,12 +154,18 @@ bool checkRC522Connection() {
 
 void reinitRC522() {
   configureSPI_RC522();
-  rfid.PCD_Init();
-  delay(50);
+  rfid.PCD_Reset();     // Software reset the RC522
+  delay(50);            // Give it time to reset
+  rfid.PCD_Init();      // Initialize the RC522
+  delay(50);            // Give it time to initialize
   
   if (checkRC522Connection()) {
     rc522_initialized = true;
     rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+    rfid.PCD_WriteRegister(rfid.TxModeReg, 0x00);
+    rfid.PCD_WriteRegister(rfid.RxModeReg, 0x00);
+    // Reset ModWidthReg
+    rfid.PCD_WriteRegister(rfid.ModWidthReg, 0x26);
     digitalWrite(redLedPin, LOW);
     Serial.println(F("RC522 initialized successfully"));
   } else {
@@ -164,6 +173,9 @@ void reinitRC522() {
     digitalWrite(redLedPin, HIGH);
     Serial.println(F("RC522 initialization failed"));
   }
+  
+  // Clear any pending interrupts
+  rfid.PCD_WriteRegister(rfid.ComIrqReg, 0x7F);
 }
 
 bool initRF24() {
@@ -191,14 +203,11 @@ bool initRF24() {
 }
 
 float readBatteryVoltage() {
-  digitalWrite(greenLedPin, HIGH);  // Power indicator
   delay(5);  // Let voltage stabilize
   
   int reading = analogRead(A2);
   float vout = (reading * VREF) / 1024.0;
   float voltage = vout * VOLTAGE_DIVIDER;
-  
-  digitalWrite(greenLedPin, LOW);
   
   // Constrain to reasonable values
   if (voltage < 0) voltage = 0;
@@ -207,13 +216,18 @@ float readBatteryVoltage() {
   return voltage;
 }
 
-bool isCardAuthorized(uint32_t cardId) {
-  for(int i = 0; i < num_authorized_cards; i++) {
-    if(authorized_cards[i] == cardId) {
-      return true;
+const CardUser* findCard(uint32_t cardId) {
+  for(int i = 0; i < num_cards; i++) {
+    if(card_users[i].card_id == cardId) {
+      return &card_users[i];
     }
   }
-  return false;
+  return nullptr;
+}
+
+bool isCardAuthorized(uint32_t cardId) {
+  const CardUser* user = findCard(cardId);
+  return user ? user->authorized : false;
 }
 
 void indicateAuthorizedCard() {
@@ -238,6 +252,12 @@ void indicateUnauthorizedCard() {
 }
 
 void handleCardDetection() {
+  // Start LED and buzzer for 1 second of card detection feedback
+  digitalWrite(greenLedPin, HIGH);
+  tone(BUZZER_PIN, 2000); // 2kHz tone
+  
+  // Save the start time
+  unsigned long startTime = millis();
   
   // Power up radio with extended stabilization
   configureSPI_RF24();
@@ -254,8 +274,19 @@ void handleCardDetection() {
   Serial.print(F("Card detected! ID: "));
   Serial.println(cardId);
   
+  // Look up card user
+  const CardUser* user = findCard(cardId);
   sensorData5.card_id = cardId;
-  sensorData5.authorized = isCardAuthorized(cardId);
+  
+  if (user) {
+    strncpy(sensorData5.user_name, user->user_name, sizeof(sensorData5.user_name) - 1);
+    sensorData5.user_name[sizeof(sensorData5.user_name) - 1] = '\0';  // Ensure null termination
+    sensorData5.authorized = user->authorized;
+  } else {
+    strncpy(sensorData5.user_name, "Unknown", sizeof(sensorData5.user_name));
+    sensorData5.authorized = false;
+  }
+  
   sensorData5.batt = readBatteryVoltage();
   
   // Switch to RF24 SPI configuration and send data
@@ -290,19 +321,22 @@ void handleCardDetection() {
   
   if (report) {
     Serial.println(F("Transmission successful"));
-    // Indicate card authorization status
-    if (sensorData5.authorized) {
-      indicateAuthorizedCard();
-    } else {
-      indicateUnauthorizedCard();
-    }
   } else {
     Serial.println(F("Transmission failed"));
     digitalWrite(redLedPin, HIGH);
-    tone(BUZZER_PIN, 100, 500); // Error tone
-    delay(500);
+    delay(100);
     digitalWrite(redLedPin, LOW);
   }
+  
+  // Calculate how much time is left from the 1 second
+  unsigned long elapsedTime = millis() - startTime;
+  if (elapsedTime < 1000) {
+    delay(1000 - elapsedTime); // Wait the remaining time
+  }
+  
+  // Turn off green LED and buzzer
+  digitalWrite(greenLedPin, LOW);
+  noTone(BUZZER_PIN);
   
   // Clean up with improved timing
   configureSPI_RC522();

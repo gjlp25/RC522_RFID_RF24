@@ -149,6 +149,7 @@ struct {
   bool authorized;
   float batt;
   unsigned char sensor_id;
+  char user_name[16];  // Added user name field
 } sensorData5;
 
 /*===========================================================
@@ -502,6 +503,7 @@ void MQTT_sensorData5() {
   }
  
   String payloadString = "{\"card_id\":\"" + String(cardIdString) + 
+                        "\",\"user_name\":\"" + String(sensorData5.user_name) + 
                         "\",\"authorized\":\"" + String(sensorData5.authorized ? "true" : "false") + 
                         "\",\"batt\":\"" + String(battString) + 
                         "\",\"batt_perc\":\"" + String(battPercString) + 

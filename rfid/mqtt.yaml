@@ -29,10 +29,11 @@ sensor:
   - platform: mqtt
     name: "RFID Reader 1"
     state_topic: "rf24/rfid1"
-    value_template: "{{ value_json.card_id }}"
+    value_template: "{{ value_json.user_name }}"
     json_attributes_topic: "rf24/rfid1"
     json_attributes_template: >-
       {
+        "card_id": {{ value_json.card_id }},
         "authorized": {{ value_json.authorized }},
         "battery": {{ value_json.batt }},
         "battery_percentage": {{ value_json.batt_perc }},
@@ -79,7 +80,7 @@ automation:
       - service: notify.notify
         data:
           title: "Unauthorized RFID Access Attempt"
-          message: "Card ID {{ trigger.payload_json.card_id }} attempted access"
+          message: "User '{{ trigger.payload_json.user_name }}' (Card ID: {{ trigger.payload_json.card_id }}) attempted access"
 
   # Communication issues
   - alias: "RFID Communication Problems"
