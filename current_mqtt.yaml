@@ -32,7 +32,7 @@ sensor:
     value_template: "{{ value_json.motion }}"
     json_attributes_topic: "rf24/pir1"
     qos: 0
-    icon: mdi:lightbulb
+    icon: mdi:motion-sensor
   
   # Door sensors
   - name: "door1"

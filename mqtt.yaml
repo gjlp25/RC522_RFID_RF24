@@ -1,111 +1,96 @@
-# Gateway heartbeat sensor and RFID binary sensors
+sensor:
+  # Temperature sensors
+  - name: "temp1"
+    state_topic: "rf24/temp1"
+    value_template: "{{ value_json.temp }}"
+    json_attributes_topic: "rf24/temp1"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    icon: mdi:thermometer
+  - name: "temp2"
+    state_topic: "rf24/temp2"
+    value_template: "{{ value_json.temp }}"
+    json_attributes_topic: "rf24/temp2"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    icon: mdi:thermometer
+  - name: "temp3"
+    state_topic: "rf24/temp3"
+    value_template: "{{ value_json.temp }}"
+    json_attributes_topic: "rf24/temp3"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    icon: mdi:thermometer
+  
+  # Motion sensors
+  - name: "pir1"
+    state_topic: "rf24/pir1"
+    value_template: "{{ value_json.motion }}"
+    json_attributes_topic: "rf24/pir1"
+    qos: 0
+    icon: mdi:lightbulb
+  
+  # Door sensors
+  - name: "door1"
+    state_topic: "rf24/door1"
+    value_template: "{{ value_json.door }}"
+    json_attributes_topic: "rf24/door1"
+    qos: 0
+    icon: mdi:door
+  - name: "door2"
+    state_topic: "rf24/door2"
+    value_template: "{{ value_json.door }}"
+    json_attributes_topic: "rf24/door2"
+    qos: 0
+    icon: mdi:door
+
+  # RFID sensors
+  - name: "rfid1"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.user_name | default('None') }}"
+    json_attributes_topic: "rf24/rfid1"
+    json_attributes_template: >-
+      {
+        "user_name": "{{ value_json.user_name }}",
+        "battery": {{ value_json.batt }},
+        "battery_percentage": {{ value_json.batt_perc }},
+        "signal": {{ value_json.signal | default(0) }},
+        "retries": {{ value_json.retries | default(0) }}
+      }
+    qos: 0
+    icon: mdi:card-account-details
+  
+  - name: "rfid1_battery"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.batt_perc }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery
+
 binary_sensor:
-  - platform: mqtt
-    name: "RF24 Gateway Status"
-    state_topic: "gateway/heartbeat"
+  # PIR motion sensor
+  - name: "PIR1"
+    device_class: motion
+    state_topic: "rf24/pir1"
+    value_template: "{{ value_json.motion }}"
+    json_attributes_topic: "rf24/pir1"
     payload_on: "on"
     payload_off: "off"
+    qos: 0
+
+  # RFID binary sensors
+  - name: "rfid1_status"
     device_class: connectivity
-
-  - platform: mqtt
-    name: "RFID Reader 1 Access"
-    state_topic: "rf24/rfid1"
-    value_template: "{{ value_json.authorized }}"
-    payload_on: "true"
-    payload_off: "false"
-    device_class: "lock"
-
-  - platform: mqtt
-    name: "RFID Reader 1 Connection"
     state_topic: "rf24/rfid1"
     value_template: "{{ value_json.connected | default('false') }}"
     payload_on: "true"
     payload_off: "false"
-    device_class: "connectivity"
+    qos: 0
 
-# RFID Sensors
-sensor:
-  # RFID Reader 1
-  - platform: mqtt
-    name: "RFID Reader 1"
+  - name: "rfid1_authorized"
+    device_class: lock
     state_topic: "rf24/rfid1"
-    value_template: "{{ value_json.card_id }}"
-    json_attributes_topic: "rf24/rfid1"
-    json_attributes_template: >-
-      {
-        "authorized": {{ value_json.authorized }},
-        "battery": {{ value_json.batt }},
-        "battery_percentage": {{ value_json.batt_perc }},
-        "last_retry_count": {{ value_json.retries | default(0) }},
-        "signal_quality": {{ value_json.signal | default(0) }}
-      }
-    device_class: "id"
-    state_class: "measurement"
-
-  # Battery level sensor
-  - platform: mqtt
-    name: "RFID Reader 1 Battery"
-    state_topic: "rf24/rfid1"
-    unit_of_measurement: "%"
-    value_template: "{{ value_json.batt_perc }}"
-    device_class: "battery"
-    state_class: "measurement"
-
-  # RF24 Signal Quality Indicator
-  - platform: mqtt
-    name: "RFID Reader 1 Signal"
-    state_topic: "rf24/rfid1"
-    unit_of_measurement: "%"
-    value_template: "{{ value_json.signal | default(0) }}"
-    device_class: "signal_strength"
-    state_class: "measurement"
-
-  # Transmission Retry Counter
-  - platform: mqtt
-    name: "RFID Reader 1 Retries"
-    state_topic: "rf24/rfid1"
-    value_template: "{{ value_json.retries | default(0) }}"
-    state_class: "measurement"
-
-# Automations
-automation:
-  # Unauthorized access attempts
-  - alias: "RFID Unauthorized Access Attempt"
-    trigger:
-      platform: mqtt
-      topic: "rf24/rfid1"
-      value_template: "{{ value_json.authorized == 'false' }}"
-    action:
-      - service: notify.notify
-        data:
-          title: "Unauthorized RFID Access Attempt"
-          message: "Card ID {{ trigger.payload_json.card_id }} attempted access"
-
-  # Communication issues
-  - alias: "RFID Communication Problems"
-    trigger:
-      platform: mqtt
-      topic: "rf24/rfid1"
-      value_template: "{{ value_json.retries > 2 }}"
-    action:
-      - service: notify.notify
-        data:
-          title: "RFID Communication Issues"
-          message: >
-            High retry count ({{ trigger.payload_json.retries }}) detected.
-            Signal quality: {{ trigger.payload_json.signal }}%
-            Battery level: {{ trigger.payload_json.batt_perc }}%
-
-  # Low signal quality alert
-  - alias: "RFID Low Signal Quality"
-    trigger:
-      platform: mqtt
-      topic: "rf24/rfid1"
-      value_template: "{{ value_json.signal < 50 }}"
-    action:
-      - service: notify.notify
-        data:
-          title: "RFID Signal Quality Alert"
-          message: >
-            Low signal quality detected ({{ trigger.payload_json.signal }}%).
-            Consider checking antenna position or interference sources.
+    value_template: "{{ value_json.authorized }}"
+    payload_on: "true"
+    payload_off: "false"
+    qos: 0
