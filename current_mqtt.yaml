@@ -1,0 +1,96 @@
+sensor:
+  # Temperature sensors
+  - name: "temp1"
+    state_topic: "rf24/temp1"
+    value_template: "{{ value_json.temp }}"
+    json_attributes_topic: "rf24/temp1"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    icon: mdi:thermometer
+  - name: "temp2"
+    state_topic: "rf24/temp2"
+    value_template: "{{ value_json.temp }}"
+    json_attributes_topic: "rf24/temp2"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    icon: mdi:thermometer
+  - name: "temp3"
+    state_topic: "rf24/temp3"
+    value_template: "{{ value_json.temp }}"
+    json_attributes_topic: "rf24/temp3"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    icon: mdi:thermometer
+  
+  # Motion sensors
+  - name: "pir1"
+    state_topic: "rf24/pir1"
+    value_template: "{{ value_json.motion }}"
+    json_attributes_topic: "rf24/pir1"
+    qos: 0
+    icon: mdi:lightbulb
+  
+  # Door sensors
+  - name: "door1"
+    state_topic: "rf24/door1"
+    value_template: "{{ value_json.door }}"
+    json_attributes_topic: "rf24/door1"
+    qos: 0
+    icon: mdi:door
+  - name: "door2"
+    state_topic: "rf24/door2"
+    value_template: "{{ value_json.door }}"
+    json_attributes_topic: "rf24/door2"
+    qos: 0
+    icon: mdi:door
+
+  # RFID sensors
+  - name: "rfid1"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.user_name | default('None') }}"
+    json_attributes_topic: "rf24/rfid1"
+    json_attributes_template: >-
+      {
+        "card_id": "{{ value_json.card_id }}",
+        "battery": {{ value_json.batt }},
+        "battery_percentage": {{ value_json.batt_perc }},
+        "signal": {{ value_json.signal | default(0) }},
+        "retries": {{ value_json.retries | default(0) }}
+      }
+    qos: 0
+    icon: mdi:card-account-details
+  
+  - name: "rfid1_battery"
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.batt_perc }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery
+
+binary_sensor:
+  # PIR motion sensor
+  - name: "PIR1"
+    device_class: motion
+    state_topic: "rf24/pir1"
+    value_template: "{{ value_json.motion }}"
+    json_attributes_topic: "rf24/pir1"
+    payload_on: "on"
+    payload_off: "off"
+    qos: 0
+
+  # RFID binary sensors
+  - name: "rfid1_status"
+    device_class: connectivity
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.connected | default('false') }}"
+    payload_on: "true"
+    payload_off: "false"
+    qos: 0
+
+  - name: "rfid1_authorized"
+    device_class: lock
+    state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.authorized }}"
+    payload_on: "true"
+    payload_off: "false"
+    qos: 0

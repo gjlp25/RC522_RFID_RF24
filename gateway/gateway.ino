@@ -195,11 +195,28 @@ void MQTT_sensorData5() {
     );
     
     // Publish to MQTT
-    client.publish("rf24/rfid1", mqtt_message, true);
+    // Send the RFID data
+    client.publish("rf24/rfid1", mqtt_message, false);  // Don't retain the message
     
     // Debug output
     Serial.println(F("Published RFID data to MQTT:"));
     Serial.println(mqtt_message);
+    
+    // Send a follow-up message clearing the user name after a short delay
+    delay(100);  // Small delay to ensure messages arrive in correct order
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"card_id\":\"\","
+        "\"user_name\":\"\","
+        "\"authorized\":false,"
+        "\"batt\":%.2f,"
+        "\"batt_perc\":%.1f,"
+        "\"retries\":0,"
+        "\"signal\":100,"
+        "\"connected\":true}",
+        sensorData5.batt,
+        batt_percentage
+    );
+    client.publish("rf24/rfid1", mqtt_message, true);  // Retain this clear message
 }
 
 // Placeholder functions for other sensor types
