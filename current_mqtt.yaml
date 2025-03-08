@@ -1,6 +1,7 @@
 sensor:
   # Temperature sensors
   - name: "temp1"
+    unique_id: "temp1"
     state_topic: "rf24/temp1"
     value_template: "{{ value_json.temp }}"
     json_attributes_topic: "rf24/temp1"
@@ -8,6 +9,7 @@ sensor:
     device_class: temperature
     icon: mdi:thermometer
   - name: "temp2"
+    unique_id: "temp2"
     state_topic: "rf24/temp2"
     value_template: "{{ value_json.temp }}"
     json_attributes_topic: "rf24/temp2"
@@ -15,6 +17,7 @@ sensor:
     device_class: temperature
     icon: mdi:thermometer
   - name: "temp3"
+    unique_id: "temp3"
     state_topic: "rf24/temp3"
     value_template: "{{ value_json.temp }}"
     json_attributes_topic: "rf24/temp3"
@@ -24,6 +27,7 @@ sensor:
   
   # Motion sensors
   - name: "pir1"
+    unique_id: "pir1"
     state_topic: "rf24/pir1"
     value_template: "{{ value_json.motion }}"
     json_attributes_topic: "rf24/pir1"
@@ -32,20 +36,32 @@ sensor:
   
   # Door sensors
   - name: "door1"
+    unique_id: "door1"
     state_topic: "rf24/door1"
     value_template: "{{ value_json.door }}"
     json_attributes_topic: "rf24/door1"
     qos: 0
     icon: mdi:door
   - name: "door2"
+    unique_id: "door2"
     state_topic: "rf24/door2"
     value_template: "{{ value_json.door }}"
     json_attributes_topic: "rf24/door2"
     qos: 0
     icon: mdi:door
 
+  # Doorbell sensor
+  - name: "doorbell1"
+    unique_id: "doorbell1"
+    state_topic: "rf24/doorbell_flag"
+    value_template: "{{ value_json.doorbell }}"
+    json_attributes_topic: "rf24/doorbell_flag"
+    qos: 0
+    icon: mdi:bell
+
   # RFID sensors
   - name: "rfid1"
+    unique_id: "rfid1"
     state_topic: "rf24/rfid1"
     value_template: "{{ value_json.user_name | default('None') }}"
     json_attributes_topic: "rf24/rfid1"
@@ -60,8 +76,42 @@ sensor:
     qos: 0
     icon: mdi:card-account-details
   
+  # Battery level sensors
   - name: "rfid1_battery"
+    unique_id: "rfid1_battery"
     state_topic: "rf24/rfid1"
+    value_template: "{{ value_json.batt_perc }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery
+
+  - name: "pir1_battery"
+    unique_id: "pir1_battery"
+    state_topic: "rf24/pir1"
+    value_template: "{{ value_json.batt_perc }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery
+
+  - name: "door1_battery"
+    unique_id: "door1_battery"
+    state_topic: "rf24/door1"
+    value_template: "{{ value_json.batt_perc }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery
+
+  - name: "door2_battery"
+    unique_id: "door2_battery"
+    state_topic: "rf24/door2"
+    value_template: "{{ value_json.batt_perc }}"
+    unit_of_measurement: "%"
+    device_class: battery
+    icon: mdi:battery
+
+  - name: "doorbell1_battery"
+    unique_id: "doorbell1_battery"
+    state_topic: "rf24/doorbell_flag"
     value_template: "{{ value_json.batt_perc }}"
     unit_of_measurement: "%"
     device_class: battery
@@ -70,16 +120,42 @@ sensor:
 binary_sensor:
   # PIR motion sensor
   - name: "PIR1"
+    unique_id: "pir1_motion"
     device_class: motion
     state_topic: "rf24/pir1"
-    value_template: "{{ value_json.motion }}"
+    value_template: "{{ value_json.motion == 'detected' }}"
     json_attributes_topic: "rf24/pir1"
-    payload_on: "on"
-    payload_off: "off"
+    qos: 0
+
+  # Door sensors as binary sensors
+  - name: "Door1 Status"
+    unique_id: "door1_status"
+    device_class: door
+    state_topic: "rf24/door1"
+    value_template: "{{ value_json.door == 'open' }}"
+    json_attributes_topic: "rf24/door1"
+    qos: 0
+
+  - name: "Door2 Status"
+    unique_id: "door2_status"
+    device_class: door
+    state_topic: "rf24/door2"
+    value_template: "{{ value_json.door == 'open' }}"
+    json_attributes_topic: "rf24/door2"
+    qos: 0
+
+  # Doorbell binary sensor
+  - name: "Doorbell1 Status"
+    unique_id: "doorbell1_status"
+    device_class: occupancy
+    state_topic: "rf24/doorbell_flag"
+    value_template: "{{ value_json.doorbell == 'on' }}"
+    json_attributes_topic: "rf24/doorbell_flag"
     qos: 0
 
   # RFID binary sensors
   - name: "rfid1_status"
+    unique_id: "rfid1_connection"
     device_class: connectivity
     state_topic: "rf24/rfid1"
     value_template: "{{ value_json.connected | default('false') }}"
@@ -88,6 +164,7 @@ binary_sensor:
     qos: 0
 
   - name: "rfid1_authorized"
+    unique_id: "rfid1_auth"
     device_class: lock
     state_topic: "rf24/rfid1"
     value_template: "{{ value_json.authorized }}"
