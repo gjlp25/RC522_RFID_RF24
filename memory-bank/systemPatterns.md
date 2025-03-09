@@ -52,9 +52,44 @@ stateDiagram-v2
 - Protected transactions using beginTransaction/endTransaction
 
 ### 4. Power Management Strategy
-- Sleep mode during idle periods
-- Wake on interrupt only
-- Optimized power states for different operations
+```mermaid
+stateDiagram-v2
+    [*] --> Sleep: No Card
+    Sleep --> Active: Card Detected
+    Active --> ProcessCard: Read Success
+    ProcessCard --> RadioOn: Data Ready
+    RadioOn --> Transmit: Send Data
+    Transmit --> RadioOff: Complete
+    RadioOff --> Sleep: Return to Sleep
+    
+    note right of Sleep
+        - ADC_OFF
+        - BOD_OFF
+        - 30ms intervals
+    end note
+    
+    note right of RadioOn
+        - Power up RF24
+        - 20ms stabilization
+    end note
+```
+
+- **Sleep Mode Management**
+  * Deep sleep during idle periods (SLEEP_30MS)
+  * ADC and BOD disabled for minimum power
+  * Quick wake and check cycle
+  * Immediate return to sleep if no card
+
+- **Device Power States**
+  * RC522: Active only during card detection
+  * NRF24L01: Powered down when not transmitting
+  * LEDs: Minimal activation for feedback
+  * SPI: Controlled power sharing
+
+- **Voltage Monitoring**
+  * Continuous battery level tracking
+  * Voltage divider: R1=1.33kΩ, R2=330Ω
+  * Measured through analog input A2
 
 ### 5. Error Recovery Patterns
 ```mermaid

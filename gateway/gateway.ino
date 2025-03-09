@@ -186,20 +186,41 @@ void MQTT_sensorData5() {
         "\"batt_perc\":%.1f,"
         "\"retries\":0,"
         "\"signal\":100,"
-        "\"connected\":true}",
+        "\"connected\":true,"
+        "\"unique_id\":\"rfid%d\"}",
         card_id_str,
         sensorData5.user_name,
         sensorData5.authorized ? "true" : "false",
         sensorData5.batt,
-        batt_percentage
+        batt_percentage,
+        sensorData5.sensor_id
     );
     
     // Publish to MQTT
-    client.publish("rf24/rfid1", mqtt_message, true);
+    // Send the RFID data
+    client.publish("rf24/rfid1", mqtt_message, false);  // Don't retain the message
     
     // Debug output
     Serial.println(F("Published RFID data to MQTT:"));
     Serial.println(mqtt_message);
+    
+    // Send a follow-up message clearing the user name after a short delay
+    delay(100);  // Small delay to ensure messages arrive in correct order
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"card_id\":\"\","
+        "\"user_name\":\"\","
+        "\"authorized\":false,"
+        "\"batt\":%.2f,"
+        "\"batt_perc\":%.1f,"
+        "\"retries\":0,"
+        "\"signal\":100,"
+        "\"connected\":true,"
+        "\"unique_id\":\"rfid%d\"}",
+        sensorData5.batt,
+        batt_percentage,
+        sensorData5.sensor_id
+    );
+    client.publish("rf24/rfid1", mqtt_message, true);  // Retain this clear message
 }
 
 // Placeholder functions for other sensor types
@@ -209,8 +230,8 @@ void MQTT_sensorData1() {
     sensorBatt = sensorData1.batt;
     
     snprintf(mqtt_message, sizeof(mqtt_message),
-        "{\"temp\":%.2f,\"hum\":%.2f,\"pres\":%.2f,\"batt\":%.2f,\"batt_perc\":%.1f}",
-        sensorData1.temp, sensorData1.hum, sensorData1.pres, sensorData1.batt, battery_perc());
+        "{\"temp\":%.2f,\"hum\":%.2f,\"pres\":%.2f,\"batt\":%.2f,\"batt_perc\":%.1f,\"unique_id\":\"temp%d\"}",
+        sensorData1.temp, sensorData1.hum, sensorData1.pres, sensorData1.batt, battery_perc(), sensorData1.sensor_id);
     
     char topic[32];
     snprintf(topic, sizeof(topic), "rf24/temp%d", sensorData1.sensor_id);
@@ -219,9 +240,16 @@ void MQTT_sensorData1() {
 
 void MQTT_sensorData2() {
     // Doorbell sensor data
+    char mqtt_message[128];
     sensorBatt = sensorData2.batt;
+    
+    snprintf(mqtt_message, sizeof(mqtt_message),
+        "{\"doorbell\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f,\"unique_id\":\"doorbell1\"}",
+        sensorData2.doorbell ? "on" : "off", sensorData2.batt, battery_perc());
+    
+    client.publish("rf24/doorbell_flag", mqtt_message, true);
+    
     if (sensorData2.doorbell == 1) {
-        client.publish("rf24/doorbell_flag", "on", true);
         doorbell_flag = true;
         previousMillis1 = millis();
     }
@@ -233,8 +261,8 @@ void MQTT_sensorData3() {
     sensorBatt = sensorData3.batt;
     
     snprintf(mqtt_message, sizeof(mqtt_message),
-        "{\"door\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f}",
-        sensorData3.door ? "open" : "closed", sensorData3.batt, battery_perc());
+        "{\"door\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f,\"unique_id\":\"door%d\"}",
+        sensorData3.door ? "open" : "closed", sensorData3.batt, battery_perc(), sensorData3.sensor_id);
     
     char topic[32];
     snprintf(topic, sizeof(topic), "rf24/door%d", sensorData3.sensor_id);
@@ -247,8 +275,8 @@ void MQTT_sensorData4() {
     sensorBatt = sensorData4.batt;
     
     snprintf(mqtt_message, sizeof(mqtt_message),
-        "{\"motion\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f}",
-        sensorData4.motion ? "detected" : "clear", sensorData4.batt, battery_perc());
+        "{\"motion\":\"%s\",\"batt\":%.2f,\"batt_perc\":%.1f,\"unique_id\":\"pir%d\"}",
+        sensorData4.motion ? "detected" : "clear", sensorData4.batt, battery_perc(), sensorData4.sensor_id);
     
     char topic[32];
     snprintf(topic, sizeof(topic), "rf24/pir%d", sensorData4.sensor_id);
@@ -359,6 +387,8 @@ void setup() {
 }
 
 void loop() {
+    char mqtt_message[128];  // Buffer for MQTT messages
+    
     ArduinoOTA.handle();
     
     // Handle MQTT connection
@@ -411,7 +441,10 @@ void loop() {
     currentMillis = millis();
     if (doorbell_flag && (currentMillis - previousMillis1 > interval1)) {
         doorbell_flag = false;
-        client.publish("rf24/doorbell_flag", "off", true);
+        snprintf(mqtt_message, sizeof(mqtt_message),
+            "{\"doorbell\":\"off\",\"batt\":%.2f,\"batt_perc\":%.1f,\"unique_id\":\"doorbell1\"}",
+            sensorBatt, battery_perc());
+        client.publish("rf24/doorbell_flag", mqtt_message, true);
         previousMillis1 = 0;
     }
 

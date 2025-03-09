@@ -46,6 +46,35 @@
 - Active current: < 50mA
 - Battery monitoring via voltage divider (R1=1.33kΩ, R2=330Ω)
 
+**Sleep Mode Configuration**
+- Uses LowPower library
+- SLEEP_30MS intervals
+- ADC_OFF during sleep
+- BOD_OFF during sleep
+- Immediate wake on card detection
+
+**Device Power States**
+```mermaid
+graph TD
+    subgraph Sleep Mode
+        S1[ADC Off] --> S2[BOD Off]
+        S2 --> S3[30ms Cycle]
+    end
+    
+    subgraph Active Mode
+        A1[RC522 Active] --> A2[Process Card]
+        A2 --> A3[RF24 Power Up]
+        A3 --> A4[Transmit]
+        A4 --> A5[RF24 Power Down]
+    end
+```
+
+**Power Consumption Patterns**
+- RC522: Peak during card read
+- NRF24L01: Peak during transmission
+- LEDs: Brief activation only
+- MCU: Deep sleep between checks
+
 ### Communication
 1. **SPI Bus**
    - Maximum speed: 10MHz
