@@ -6,6 +6,10 @@
 3. SPI device selection is managed through dedicated configuration functions
 4. Error handling includes both visual and audio feedback
 5. Power optimization is a primary consideration in all changes
+6. Interrupt handlers are kept minimal with deferred processing
+7. Feedback timing uses consistent constants for patterns
+8. Audio frequencies are standardized (2kHz, 400Hz, 100Hz)
+9. Hardware state changes are synchronized with feedback
 
 ## Code Style
 1. Functions use camelCase naming
@@ -43,3 +47,7 @@
 2. NRF24L01 needs power stabilization delays
 3. SPI bus sharing requires careful state management
 4. Interrupt handling is timing-sensitive
+5. Buzzer frequency affects power consumption
+6. LED brightness impacts battery life
+7. IRQ pin needs manual state management after wake
+8. Feedback patterns must account for processing delays
